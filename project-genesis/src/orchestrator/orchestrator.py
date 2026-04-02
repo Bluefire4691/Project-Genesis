@@ -6,6 +6,11 @@ and controls learning progression. It doesn't process data itself — it
 decides what gets processed, by whom, and what to do with the results.
 
 Like the brain's executive function: coordination, not computation.
+
+M1 addition: SurvivalOS integration. The Orchestrator now consults
+Layer 0 at the start of each cycle. Throttle level determines which
+processors and memory operations are available. Resource-constrained
+cycles degrade gracefully rather than failing.
 """
 
 import json
@@ -17,6 +22,7 @@ from utils.types import ProcessorOutput
 from processors import TextProcessor, NumericProcessor, PatternProcessor
 from memory.memory import MemorySystem
 from curriculum.curriculum import CurriculumEngine
+from survival import SurvivalOS
 
 
 class Orchestrator:
@@ -24,9 +30,13 @@ class Orchestrator:
     The central coordinating intelligence.
 
     Never crashes. Every decision is logged. Every error is data.
+
+    With a SurvivalOS attached (default), each cycle begins with a
+    resource tick. The orchestrator checks which capabilities are
+    available before dispatching to processors and memory.
     """
 
-    def __init__(self, verbose: bool = True):
+    def __init__(self, verbose: bool = True, survival: SurvivalOS | None = None):
         self.processors = {
             "text": TextProcessor(),
             "numeric": NumericProcessor(),
@@ -36,7 +46,11 @@ class Orchestrator:
         self.curriculum = CurriculumEngine()
         self.verbose = verbose
         self.cycle_count = 0
+        self.error_count = 0
         self.log: list[str] = []
+
+        # Layer 0 — Survival OS. Created by default if not provided.
+        self.survival: SurvivalOS = survival if survival is not None else SurvivalOS()
 
     def _log(self, msg: str):
         self.log.append(msg)
@@ -50,10 +64,21 @@ class Orchestrator:
         """
         self.cycle_count += 1
 
+        # Layer 0 tick — update resource state and directives
+        survival_stats = self._survival_stats()
+        survival_state = self.survival.tick(survival_stats)
+
+        if self.verbose and survival_state["throttle"] != "NONE":
+            self._log(
+                f"⚡ Survival OS: energy={survival_state['energy']:.2f} "
+                f"throttle={survival_state['throttle']} "
+                f"pressure={survival_state['pressure']:.2f}"
+            )
+
         try:
             return self._do_process(input_type, data)
         except Exception as e:
-            # Ultimate fallback — even the orchestrator's own logic is wrapped
+            self.error_count += 1
             self._log(f"⚠ Orchestrator error (non-fatal): {e}")
             return {
                 "status": "degraded",
@@ -63,44 +88,54 @@ class Orchestrator:
 
     def _do_process(self, input_type: str, data: Any) -> dict:
         """Internal processing — the actual work."""
-        processor = self.processors.get(input_type)
-        if not processor:
-            self._log(f"⚠ No processor for '{input_type}' — routing to text as fallback")
-            processor = self.processors["text"]
-            data = str(data)
+        # Resolve processor, respecting current throttle level
+        processor = self._select_processor(input_type, data)
+        processor_type = processor.name
 
         # Process
-        output = processor.process(data)
+        output = processor.process(data if processor_type != "text" or input_type == "text" else str(data))
         self._log(f"→ {output.source} processor: {output.context}")
 
-        # Evaluate against curriculum
-        eval_score = self.curriculum.evaluate_processing(output)
-        self.curriculum.record_score(eval_score)
-        self._log(f"  Eval: {eval_score:.2f} | Stage avg: {self.curriculum.stage_scores[self.curriculum.current_stage]:.2f}")
+        # Evaluate against curriculum (only if curriculum capability is available)
+        if self.survival.can("curriculum"):
+            eval_score = self.curriculum.evaluate_processing(output)
+            self.curriculum.record_score(eval_score)
+            self._log(
+                f"  Eval: {eval_score:.2f} | "
+                f"Stage avg: {self.curriculum.stage_scores[self.curriculum.current_stage]:.2f}"
+            )
+        else:
+            eval_score = output.importance
+            self._log("  Curriculum eval skipped (resource pressure)")
 
-        # Store in memory (always — total retention)
-        raw = str(data) if not isinstance(data, str) else data
-        memory_content = f"{raw} | {json.dumps(output.extracted, default=str)}"
-        self.memory.store(
-            key=output.suggested_key,
-            content=memory_content,
-            context=output.context,
-            source_type=output.source,
-            relevance=output.importance,
-        )
-        self._log(f"  💾 Stored '{output.suggested_key}' (relevance: {output.importance:.2f})")
+        # Store in memory — conditionally on throttle level
+        if self.survival.can("memory_store"):
+            raw = str(data) if not isinstance(data, str) else data
+            memory_content = f"{raw} | {json.dumps(output.extracted, default=str)}"
+            self.memory.store(
+                key=output.suggested_key,
+                content=memory_content,
+                context=output.context,
+                source_type=output.source,
+                relevance=output.importance,
+            )
+            if self.survival.can("logging"):
+                self._log(f"  💾 Stored '{output.suggested_key}' (relevance: {output.importance:.2f})")
 
-        # Update attention context based on what we just processed
-        attention_terms = output.extracted.get("keywords", [])
-        if output.extracted.get("categories"):
-            attention_terms.extend(output.extracted["categories"])
-        if output.extracted.get("label"):
-            attention_terms.append(output.extracted["label"])
-        if attention_terms:
-            self.memory.update_attention(attention_terms)
+            # Update attention context
+            attention_terms = output.extracted.get("keywords", [])
+            if output.extracted.get("categories"):
+                attention_terms.extend(output.extracted["categories"])
+            if output.extracted.get("label"):
+                attention_terms.append(output.extracted["label"])
+            if attention_terms:
+                self.memory.update_attention(attention_terms)
+        else:
+            if self.survival.can("logging"):
+                self._log("  Memory storage skipped (emergency throttle)")
 
-        # Check for stage advancement
-        if self.curriculum.should_advance():
+        # Check for stage advancement (only when not in survival mode)
+        if self.survival.can("curriculum") and self.curriculum.should_advance():
             advanced = self.curriculum.advance()
             if advanced:
                 self._log(f"  🎓 ADVANCED to stage {self.curriculum.current_stage.name}!")
@@ -112,11 +147,43 @@ class Orchestrator:
             "eval_score": eval_score,
             "stage": self.curriculum.current_stage.name,
             "cycle": self.cycle_count,
+            "throttle": self.survival.resource.throttle_level.name,
         }
+
+    def _select_processor(self, input_type: str, data: Any):
+        """
+        Select a processor, degrading gracefully under resource pressure.
+
+        If the requested processor is unavailable (throttled), fall back
+        to the next available one. Text is always the final fallback.
+        """
+        requested = self.processors.get(input_type)
+
+        # Check if the requested processor type is available
+        if requested and self.survival.can(input_type):
+            return requested
+
+        # Fallback chain: numeric → text, pattern → text
+        if not self.survival.can(input_type) and input_type != "text":
+            self._log(
+                f"⚠ Processor '{input_type}' unavailable (throttle: "
+                f"{self.survival.resource.throttle_level.name}) — falling back to text"
+            )
+            return self.processors["text"]
+
+        # Unknown type or no processor found
+        if not requested:
+            self._log(f"⚠ No processor for '{input_type}' — routing to text as fallback")
+        return self.processors["text"]
 
     def query(self, question: str) -> dict:
         """Ask the system a question based on what it has learned."""
         self._log(f"❓ Query: '{question}'")
+
+        # Memory search respects throttle level
+        if not self.survival.can("memory_search"):
+            self._log("  Memory search unavailable (resource pressure)")
+            return {"answer": "System under resource pressure — memory search unavailable.", "memories_used": 0}
 
         results = self.memory.search(question, top_k=5)
 
@@ -156,9 +223,28 @@ class Orchestrator:
         print(f"  {json.dumps(self.curriculum.status(), indent=2)}")
 
     def full_status(self) -> dict:
-        return {
+        status = {
             "cycles": self.cycle_count,
+            "error_count": self.error_count,
             "curriculum": self.curriculum.status(),
             "memory": self.memory.stats(),
             "processors": list(self.processors.keys()),
+        }
+        status.update(self.survival.report())
+        return status
+
+    def _survival_stats(self) -> dict:
+        """Build the stats dict for DirectiveEngine.update()."""
+        curriculum_status = self.curriculum.status()
+        return {
+            "error_count": self.error_count,
+            "cycle_count": self.cycle_count,
+            "energy": self.survival.resource.energy,
+            "throttle_level": int(self.survival.resource.throttle_level),
+            "memories_stored": self.memory.stats().get("total_stored", 0),
+            "current_stage": int(self.curriculum.current_stage),
+            "max_stage": 4,
+            "stage_score": curriculum_status.get("stage_scores", {}).get(
+                str(self.curriculum.current_stage), 0.5
+            ),
         }
