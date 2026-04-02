@@ -469,3 +469,126 @@ when exposed to the wider world.
 - Context scoring window is top-10 working memory items — may need tuning as
   working memory grows denser
 - The `{docs,src` malformed directory — still needs cleanup
+
+---
+
+## Session 6 — April 2, 2026
+
+**Platform:** Claude Code (CLI)
+**Branch:** `claude/extract-genesis-repo-fn5vW`
+
+### What happened
+M5 built and tested. Genesis now has an open-stage data environment — no curriculum
+guardrails, no correct answers, no advancement criteria. 172 total tests, all green.
+
+### What was built
+
+**`src/curriculum/open_stage.py`** — DataStream + advance_to_open
+
+The open-stage environment. Not a test. Not a lesson. An environment.
+
+56-item pool drawn from 8 domains:
+- Natural systems (ecology, predator-prey dynamics, cascading effects)
+- Physics / measurement (motion, thermodynamics, chaos theory)
+- Biology / life processes (cell division, immune memory, sleep consolidation)
+- Human and social (cooperation, trust, language, cities, enforcement)
+- Abstract relationships (feedback loops, diminishing returns, model limits)
+- Edge cases (contradictions, anomalies, incomplete information — deliberate)
+- Scale and emergence (ant colonies, water wetness, neuronal thought)
+- Time and change (erosion, adaptation, habit formation)
+
+Mix of text, numeric, and pattern types. Edge cases are intentional — anomalous
+readings, interrupted sequences, contradictory observations. The world doesn't
+curate itself.
+
+`DataStream`:
+- Unbounded — loops indefinitely
+- Reshuffles on each loop (order itself can't become a pattern)
+- Seeded RNG for reproducibility in tests
+- `next()`, `take(n)`, `__iter__()` (infinite), `stats()`
+
+`advance_to_open(brain)`:
+- Helper to run brain through FOUNDATION → RELATIONS → REASONING
+- Returns True when OPEN stage reached, handles already-at-open case
+- Force-advances if curriculum gating would stall open-stage exploration
+
+**`src/main.py`** — full pipeline
+
+`run_curriculum_pipeline(brain)`:
+- Calls advance_to_open(), reports memory and working memory stats after
+- Prints expression snapshot post-curriculum
+
+`run_open_stage(brain, n_cycles=100)`:
+- Feeds DataStream to brain, periodic expression snapshots every N/8 cycles
+- Tracks cross-modal events over the run
+- Reports final memory delta, association count, Observer state
+- Surfaces final attention window (what Genesis is attending to)
+- Handles paused-state gracefully (prints reason and exits loop)
+
+`run_interactive(brain)`:
+- Commands: express, status, feed:<type>:<data>, pause, resume, quit
+- Human input via `feed:` goes through same pipeline as all input
+
+CLI: `--quiet`, `--interactive`, `--open-only`, `--cycles=N`
+
+**`tests/test_open_stage.py`** — 35 new tests
+- DataStream unit tests: type validity, loop behavior, shuffle, stats, pool contents
+- advance_to_open integration: reaches OPEN, stores memories, handles already-open
+- Open-stage processing: all input types, memory accumulation, never-crashes
+- Context builds over repeated thematic input
+- Edge cases: anomalous numeric data, interrupted sequences
+
+### Decisions made
+
+**Edge cases are first-class data:**
+The pool deliberately includes anomalies, contradictions, and incomplete observations.
+The world doesn't curate itself before presenting it to biological intelligence.
+An anomaly is as real as a clean fact — often more informative. A contradiction
+isn't a mistake; it's a thing that happens. Genesis should encounter them from
+the start.
+
+**No scores in OPEN stage:**
+FOUNDATION → REASONING have advancement criteria. OPEN has none. The DataStream
+is an environment, not a test. What Genesis makes of it is up to Genesis.
+The only way we know what's happening is through expression snapshots and the
+Observer — not curriculum eval scores.
+
+**Unbounded loop with per-loop shuffle:**
+An unbounded stream that repeats the same pool order every time would let processing
+order become its own pattern — Genesis could learn "text always follows numeric" rather
+than the content relationships. Per-loop reshuffle prevents this.
+
+**Periodic expression snapshots during OPEN:**
+Every N/8 cycles (so ~8 windows for a default 100-cycle run). Shows the attention
+window, association clusters, and Observer state so development is visible without
+interrupting it. Cross-modal event count tracked across the run as one measure of
+multi-processor integration activity.
+
+### M5 success criteria — status
+- ✅ Uncurated, varied data available across 8 domains (56 items, 3 types)
+- ✅ Edge cases (anomalies, contradictions, incomplete data) included
+- ✅ Stream is unbounded, reshuffles each loop, reproducible with seed
+- ✅ advance_to_open() reliably reaches OPEN stage before free data begins
+- ✅ Full pipeline: curriculum → open stage → interactive, with CLI args
+- ✅ 35 open-stage tests passing; 172 total tests green
+
+### What's next (M6)
+With all five layers running, Genesis can:
+- Survive resource pressure (M1)
+- Remember everything (M2)
+- Surface state and receive intervention (M3)
+- Integrate multiple processors with context-weighted significance (M4)
+- Encounter the uncurated world (M5)
+
+M6 options (no decisions made yet):
+- Persistence across sessions (reload memory/attention state from DB on startup)
+- Richer pattern processor (time-series analysis, trend detection beyond simple stats)
+- Context-aware stagnation stimuli (Observer injects related novelty, not generic)
+- REST/CLI interface for longer-running sessions with external queries
+- Review and tune Observer thresholds with real behavioral data
+
+### Open threads
+- The `{docs,src` malformed directory — still needs cleanup (tarball artifact)
+- Observer thresholds still default values — need real run data to tune
+- Stagnation stimulus pool is generic — could become context-aware in M6
+- Cross-modal detection still uses simple set intersection (no stemming/synonyms)
