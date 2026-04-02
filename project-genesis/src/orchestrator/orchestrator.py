@@ -23,6 +23,7 @@ from processors import TextProcessor, NumericProcessor, PatternProcessor
 from memory.memory import MemorySystem
 from curriculum.curriculum import CurriculumEngine
 from survival import SurvivalOS
+from interface import InteractionLayer
 
 
 class Orchestrator:
@@ -36,7 +37,12 @@ class Orchestrator:
     available before dispatching to processors and memory.
     """
 
-    def __init__(self, verbose: bool = True, survival: SurvivalOS | None = None):
+    def __init__(
+        self,
+        verbose: bool = True,
+        survival: SurvivalOS | None = None,
+        interaction: InteractionLayer | None = None,
+    ):
         self.processors = {
             "text": TextProcessor(),
             "numeric": NumericProcessor(),
@@ -49,8 +55,14 @@ class Orchestrator:
         self.error_count = 0
         self.log: list[str] = []
 
-        # Layer 0 — Survival OS. Created by default if not provided.
+        # Layer 0 — Survival OS.
         self.survival: SurvivalOS = survival if survival is not None else SurvivalOS()
+
+        # M3 — Interaction Layer (community surface + observer + interventions).
+        self.interaction: InteractionLayer = (
+            interaction if interaction is not None
+            else InteractionLayer(self.memory)
+        )
 
     def _log(self, msg: str):
         self.log.append(msg)
@@ -74,6 +86,28 @@ class Orchestrator:
                 f"throttle={survival_state['throttle']} "
                 f"pressure={survival_state['pressure']:.2f}"
             )
+
+        # M3 — Interaction layer tick
+        interaction_state = self.interaction.cycle(survival_stats, self.cycle_count)
+
+        # If paused by the Observer, hold without processing
+        if interaction_state["is_paused"]:
+            self._log(
+                f"⏸  Paused — {interaction_state['pause_reason']}. "
+                f"Call orchestrator.interaction.resume() to continue."
+            )
+            return {
+                "status": "paused",
+                "reason": interaction_state["pause_reason"],
+                "cycle": self.cycle_count,
+            }
+
+        # Check for pending stimulus (from stagnation intervention or human feed)
+        pending = self.interaction.next_stimulus()
+        if pending is not None:
+            stimulus_type, stimulus_data = pending
+            self._log(f"💉 Processing injected stimulus ({stimulus_type})")
+            input_type, data = stimulus_type, stimulus_data
 
         try:
             return self._do_process(input_type, data)
@@ -231,6 +265,7 @@ class Orchestrator:
             "processors": list(self.processors.keys()),
         }
         status.update(self.survival.report())
+        status.update(self.interaction.report())
         return status
 
     def _survival_stats(self) -> dict:

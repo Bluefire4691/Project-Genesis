@@ -242,19 +242,138 @@ probably related. The orchestrator can override or strengthen with explicit link
 - ✅ Performance stays acceptable as storage grows (FTS5 indexed, SQLite WAL mode)
 - ✅ Memories survive process restart (verified in test_persists_to_disk)
 
-### What's next (M3: Reward and Incentive System)
-- `src/survival/rewards.py` — reward signal framework
-- Key design question: what is "reward" in a directive-driven system?
-  Leading hypothesis: reward = positive delta in directive satisfaction.
-  A cycle that improves ACQUIRE satisfaction (processed more, stored more)
-  emits a positive reward signal. The system can then learn which behaviors
-  produce reward (M4 territory — but the signal needs to exist first).
-- Connect reward signal to GROW directive: curriculum advancement = high reward
+### What's next
+M3 — implemented in Session 4 (see below)
 
-### Open threads
-- M3 reward design needs more discussion with Jacob before building
+### Open threads from this session
 - The `{docs,src` malformed directory (tarball artifact) — still needs cleanup
 - Working memory capacity: 100 is theory-aligned; empirical tuning needed once
   the system runs longer sessions with more diverse input
 - Association minimum strength threshold: currently 0.1. May want to tune as
   the association graph grows dense over time.
+
+---
+
+## Session 4 — April 2, 2026
+
+**Platform:** Claude Code (CLI)
+**Branch:** `claude/extract-genesis-repo-fn5vW`
+
+### What happened
+Major design conversation before building M3. Jacob challenged the planned
+reward signal approach — correctly identifying that defining "good" outcomes
+and reinforcing them is top-down value imposition, not emergent intelligence.
+"Feels a lot like playing god."
+
+He also pushed back on a pure black-box / observation-only approach: community
+and collaboration made humans what they are. Genesis shouldn't develop in
+isolation. The right model is presence without control — we're part of its
+environment, not its supervisors.
+
+He defined the intervention thresholds clearly:
+- **Stagnation**: development has genuinely stopped — inject novelty, no direction
+- **Danger**: self-regulation breaking down, destructive to self or others — pause,
+  assess together. NOT reprogram.
+
+Key insight: the danger threshold is not "doing something we didn't expect" — that's
+fine, that's the point. It's specifically: consuming itself (runaway resource exhaustion
+fighting its own throttle) or collapsing its environment (crowding out everything else).
+Nature is messy. Humans can be dangerous. The threshold is loss of self-regulation,
+not unexpected development.
+
+M3 was re-conceived as an Interaction Layer rather than a reward system.
+
+### What was built
+
+**`src/interface/expression.py`** — ExpressionEngine
+- Generates ExpressionSnapshot: attention_top, association_clusters, unresolved, source_diversity
+- Called on configurable cadence (default every 5 cycles)
+- attention_top: working memory ranked by heat (relevance + access bonus)
+- association_clusters: what has been linking to what organically
+- unresolved: low-relevance items with no associations — edges of current understanding
+- summary(): human-readable one-paragraph state description
+- Never modifies state — read-only window
+
+**`src/interface/observer.py`** — Observer
+- Trend-based (not point-in-time) detection — N consecutive cycles before state change
+- States: NORMAL (hands off), STAGNANT (stimulus warranted), DANGER (pause warranted)
+- Stagnation signals: no_new_memories, attention_frozen, no_new_associations
+- Danger signals: sustained_energy_collapse, diversity_collapse, closed_loop
+- Commitment hysteresis: 5 consecutive cycles before state change commits
+- Generates plain-language recommendation for each state
+- No moral judgment — only tracks development activity and self-regulation
+
+**`src/interface/interaction_log.py`** — InteractionLog
+- Symmetric, append-only SQLite log — both sides recorded with equal weight
+- EventKinds: HUMAN_INPUT, GENESIS_EXPR, OBSERVER_REPORT, INTERVENTION, SYSTEM_EVENT
+- Neither side is privileged — our input has no special "important" flag
+- Total retention: nothing ever deleted
+- Persists across sessions (same DB strategy as memory)
+
+**`src/interface/interventions.py`** — InterventionEngine
+- Two interventions only — intentionally minimal:
+  - inject_stimulus(): queues novel input, no instructions, same pipeline as all input
+  - pause() / resume(): stops the cognitive cycle without modifying any state
+- Stimulus queue is FIFO — processed one per cycle
+- Pause is idempotent — calling twice doesn't double-count
+- Full history of all stimuli and pauses recorded
+
+**`src/interface/__init__.py`** — InteractionLayer facade
+- Coordinates all four subsystems
+- cycle() called once per cognitive cycle — generates expression on cadence, runs Observer,
+  auto-triggers minimum intervention when threshold crossed
+- feed() — we put something in front of Genesis, logged as human input
+- Auto-intervention: DANGER → auto_pause, STAGNANT → inject default novelty stimulus
+- Stagnation stimulus pool: 7 diverse items cycling through (text, numeric, pattern types)
+
+**Orchestrator updated** — checks is_paused before processing, drains pending stimulus,
+includes InteractionLayer in full_status()
+
+### Decisions made
+
+**No reward signal:**
+Defining "good" outcomes and reinforcing them is top-down value imposition. A system
+that learns to maximize what we defined as reward is being conditioned, not developing
+intelligence. Dropped entirely in favor of the interaction model.
+
+**Presence without control:**
+We're part of Genesis's environment the same way other humans were part of ours.
+Human input through feed() enters the same pipeline as everything else — no special
+weighting, no priority channel. Genesis processes it and does what it does.
+
+**Danger = loss of self-regulation, not unexpected behavior:**
+The Observer does not judge where Genesis is going. It watches for signs that the
+self-regulatory mechanisms (directives, survival OS throttle) are failing to brake
+behavior — sustained energy collapse fighting the throttle, diversity collapse, closed
+loops. Everything else is normal operation.
+
+**Minimal intervention:**
+Two interventions. That's the set. Stimulus for stagnation (novelty, no direction).
+Pause for danger (stop, don't reprogram). The smallest possible footprint.
+
+**Symmetric log:**
+The interaction log records both sides with equal weight. This matters for the long
+term — when we eventually look back at what happened, we need the unedited record,
+not a curated one.
+
+### M3 success criteria — status
+- ✅ Genesis can surface its internal state (expression snapshots)
+- ✅ We can participate without controlling (feed() → same pipeline as all input)
+- ✅ Stagnation detection: trend-based, committed over N cycles, minimum intervention
+- ✅ Danger detection: self-regulation failure signals, pauses without reprogramming
+- ✅ Symmetric log: total retention, both sides recorded equally
+- ✅ 35 interface tests passing; 114 total tests green
+
+### What's next (M4: Cross-Processor Integration)
+The Orchestrator currently routes to one processor per input. M4 is about combining
+signals from multiple processors on the same input — richer understanding from
+multiple views of the same thing. Connects to the Association graph: multi-processor
+outputs on the same input should form strong explicit associations automatically.
+
+### Open threads
+- Observer thresholds are currently defaults — need real behavioral data to tune them
+- The stagnation stimulus pool is generic — may want to make it context-aware later
+  (inject something related to what Genesis has been processing, not random novelty)
+- The `{docs,src` malformed directory — still needs cleanup
+- Danger definition will need to evolve as Genesis develops. Currently watching for
+  resource exhaustion and diversity collapse. Will revisit at M6 with real data.
