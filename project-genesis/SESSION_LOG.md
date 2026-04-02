@@ -147,18 +147,114 @@ ever deleting the underlying record.
 - ✅ System behavior changes under resource pressure (processor fallback, memory gating)
 - ✅ Every error caught and converted to data (ErrorLog, never-crash wrapping throughout)
 
-### What's next (M2)
-- `src/memory/store.py` — persistent backend (SQLite is the leading candidate)
-- `src/memory/attention.py` — dynamic relevance scoring, context-based window
-- `src/memory/associations.py` — bidirectional association graph
+### What's next
+M2 — implemented in Session 3 (see below)
 
-### Open threads
+### Open threads from this session
 - Python runtime limitation: `resource.getrusage()` gives cumulative CPU, not per-tick
   wall-clock CPU %. Could add more granular CPU pressure measurement later.
 - The `{docs,src` malformed directory in the repo root (artifact from tarball creation)
   — should be investigated and cleaned up
 - Reward system design (M3): what constitutes "reward" in a directive-driven system?
-  Leading hypothesis: reward = directive satisfaction delta (positive change in any
-  directive satisfaction is a reward signal)
-- M2 SQLite decision: needs Jacob's input on whether persistent-to-disk is wanted now
-  or if in-memory-with-file-dump is sufficient for M2
+
+---
+
+## Session 3 — April 2, 2026
+
+**Platform:** Claude Code (CLI)
+**Branch:** `claude/extract-genesis-repo-fn5vW`
+
+### What happened
+- M2 (Total-Retention Memory with Attention) designed and implemented
+- Jacob confirmed: two-tier memory (RAM working memory + SQLite long-term)
+- Jacob confirmed: both organic co-occurrence AND explicit orchestrator associations
+- Jacob confirmed: 100-item working memory capacity (aligned with OpenCog ECAN)
+- 36 tests written and passing; all 79 total tests still green
+
+### What was built
+
+**`src/memory/store.py`** — LongTermStore (SQLite backend)
+- Write-through: every memory hits SQLite immediately. Crash-safe by default.
+- FTS5 full-text search with BM25 ranking (porter stemmer, ASCII tokenizer)
+- Falls back to LIKE-based search if FTS5 not compiled in
+- Associations table: bidirectional (A→B and B→A stored), strength accumulates
+  with MAX (explicit links override weaker co-occurrence links)
+- `persists_across_reopen`: verified data survives closing and reopening connection
+- WAL journal mode + NORMAL synchronous for performance/durability balance
+
+**`src/memory/attention.py`** — WorkingMemory (bounded RAM)
+- `collections.OrderedDict` for O(1) LRU tracking
+- Capacity: 100 items (configurable)
+- Eviction: lowest heat score = `relevance + 0.15 * min(access_count, 10)`
+  — relevance dominates, but frequently-accessed items get a meaningful bonus
+- `attention_window(top_k)`: relevance-ranked view with context-term blending
+- `update_relevance(terms)`: context shift boosts matching memories, gently
+  decays others (floor 0.05 — nothing becomes invisible)
+- No eviction on key-update — updating an existing key never displaces another
+
+**`src/memory/associations.py`** — AssociationGraph
+- **Co-occurrence (organic):** memories processed within 5 cycles get weak links
+  (strength 0.3 * proximity). Strength decays with cycle distance.
+- **Explicit (orchestrator-directed):** `associate(a, b, strength=0.7)`
+- BFS traversal with compound strength decay across hops
+- Cycle-safe: each key visited at most once in traversal
+- Backed by LongTermStore — associations persist across sessions
+
+**`src/memory/memory.py`** — MemorySystem (two-tier coordinator)
+- Public API unchanged from M0 — Orchestrator required no changes
+- New `memories` property = working memory dict (backward compatible with main.py)
+- `store()`: write-through → SQLite first, then working memory
+- `recall()`: working memory (O(1)) → SQLite (disk) → promote to working memory
+- `search()`: FTS5 on full corpus → re-rank with attention context → promote top-K
+- `get_associations()`: traverses AssociationGraph, promotes results into working mem
+- `stats()` includes: working_memory, long_term, associations sub-dicts
+
+**`data/.gitignore`**
+- `*.db` gitignored — databases don't diff well and regenerate automatically
+- `data/` directory committed so the storage location is defined in the repo
+
+### Decisions made
+
+**Write-through (not write-back):**
+Write-back would be faster (batch SQLite writes) but a process crash would lose
+whatever's still in working memory. Write-through means every stored memory is
+immediately durable. The total-retention principle is non-negotiable.
+
+**100-item working memory:**
+Research check: OpenCog ECAN uses ~100 for its attentional focus. Human working
+memory is 7±2 (Miller) or ~4 chunks (Cowan) — we exploit digital advantages by
+being more generous, but not unbounded. Jacob confirmed. Adjustable.
+
+**FTS5 over keyword overlap:**
+The M0 search was word-overlap counting — fast to write, poor quality. FTS5 gives
+porter stemming (dog/dogs/canine overlap), BM25 ranking (term frequency weighting),
+and phrase queries, at zero extra dependencies. Significant quality improvement.
+
+**Organic associations via temporal proximity:**
+Co-occurrence window = 5 cycles. Strength = 0.3 * (1 - gap/window). This creates
+associations that mirror episodic memory: things learned close together in time are
+probably related. The orchestrator can override or strengthen with explicit links.
+
+### M2 success criteria — status
+- ✅ Zero data loss — everything processed stored permanently (write-through SQLite)
+- ✅ Relevant memories surface without scanning everything (FTS5 + attention window)
+- ✅ Associations form organically from co-occurrence AND explicitly via orchestrator
+- ✅ Performance stays acceptable as storage grows (FTS5 indexed, SQLite WAL mode)
+- ✅ Memories survive process restart (verified in test_persists_to_disk)
+
+### What's next (M3: Reward and Incentive System)
+- `src/survival/rewards.py` — reward signal framework
+- Key design question: what is "reward" in a directive-driven system?
+  Leading hypothesis: reward = positive delta in directive satisfaction.
+  A cycle that improves ACQUIRE satisfaction (processed more, stored more)
+  emits a positive reward signal. The system can then learn which behaviors
+  produce reward (M4 territory — but the signal needs to exist first).
+- Connect reward signal to GROW directive: curriculum advancement = high reward
+
+### Open threads
+- M3 reward design needs more discussion with Jacob before building
+- The `{docs,src` malformed directory (tarball artifact) — still needs cleanup
+- Working memory capacity: 100 is theory-aligned; empirical tuning needed once
+  the system runs longer sessions with more diverse input
+- Association minimum strength threshold: currently 0.1. May want to tune as
+  the association graph grows dense over time.
