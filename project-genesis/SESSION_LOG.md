@@ -364,16 +364,108 @@ not a curated one.
 - ✅ Symmetric log: total retention, both sides recorded equally
 - ✅ 35 interface tests passing; 114 total tests green
 
-### What's next (M4: Cross-Processor Integration)
-The Orchestrator currently routes to one processor per input. M4 is about combining
-signals from multiple processors on the same input — richer understanding from
-multiple views of the same thing. Connects to the Association graph: multi-processor
-outputs on the same input should form strong explicit associations automatically.
+### What's next
+M4 — implemented in Session 5 (see below)
 
-### Open threads
+### Open threads from this session
 - Observer thresholds are currently defaults — need real behavioral data to tune them
 - The stagnation stimulus pool is generic — may want to make it context-aware later
-  (inject something related to what Genesis has been processing, not random novelty)
 - The `{docs,src` malformed directory — still needs cleanup
-- Danger definition will need to evolve as Genesis develops. Currently watching for
-  resource exhaustion and diversity collapse. Will revisit at M6 with real data.
+- Danger definition will need to evolve as Genesis develops. Will revisit at M6.
+
+---
+
+## Session 5 — April 2, 2026
+
+**Platform:** Claude Code (CLI)
+**Branch:** `claude/extract-genesis-repo-fn5vW`
+
+### What happened
+Design conversation first. Jacob's insight reframed M4 away from "run multiple
+processors" toward something deeper: input doesn't stop — what registers depends
+on context and prior relationships. Same input, different context = different
+significance. This is how biological sensory systems work.
+
+M4 built from that principle.
+
+### What was built
+
+**`src/orchestrator/integration.py`** — IntegrationLayer
+
+Three things the Orchestrator couldn't do before:
+
+1. **Multi-processor dispatch**: all available processors (gated by throttle) see
+   every input. TextProcessor, NumericProcessor, PatternProcessor all return
+   their best read. Low-confidence outputs (< 0.05) are below-noise — not stored.
+   High-confidence outputs from processors that weren't the "intended" type are
+   stored as secondary memories.
+
+2. **Context scoring**: each processor output is scored against the current
+   working memory attention window. Overlap between what the processor found
+   and what's currently active = context score. Final significance:
+   `confidence * 0.5 + context_score * 0.5`. Equal weight — both matter.
+   Zero context = unremarkable regardless of confidence. Strong context
+   connection = meaningful regardless of processor confidence.
+
+3. **Cross-modal concept detection**: concepts appearing independently in 2+
+   processor outputs for the same input are extracted as cross-modal concepts.
+   These become the attention update terms (they get boosted in working memory)
+   and drive explicit high-strength (0.8) associations between all memory keys
+   from the same input.
+
+**`src/orchestrator/orchestrator.py`** — updated for M4
+- `_active_processors()`: returns all processors gated by throttle level.
+  NONE = all three. LIGHT = text + numeric. MODERATE+ = text only.
+  Natural degradation — lose breadth first.
+- `_store_synthesis()`: primary stored at natural key; secondary outputs
+  stored at their natural keys (confidence > 0.05 only); all keys from
+  same input linked at strength 0.8.
+- Result dict now includes: significance, context_score, cross_modal_concepts,
+  processors_run.
+
+### Decisions made
+
+**Context determines significance, not just processor confidence:**
+A confident NumericProcessor output about rainfall means nothing if Genesis
+is currently in a context about prime numbers. The 50/50 blend ensures both
+the processor's certainty and the contextual relevance matter equally.
+
+**Cross-modal storage as first-class memories:**
+Secondary processor outputs aren't summaries of the primary — they're
+independent views of the same input, stored at their own keys and linked.
+The same event seen through multiple lenses creates a richer, more resilient
+memory trace. If one key is evicted from working memory, the others persist
+and the associations pull it back when relevant.
+
+**Throttle degrades breadth, not function:**
+Under resource pressure, processors drop out in order (pattern → numeric →
+text). At CRITICAL, only TextProcessor runs — single-processor mode,
+effectively M0 behavior. Function survives; integration breadth doesn't.
+This is the right tradeoff: a degraded system that can still read and store
+is better than a wide-open system that crashes.
+
+**Plain-text input to numeric/pattern = near-zero confidence (correct):**
+Free-text given to NumericProcessor fails gracefully and returns confidence ~0.
+This is correct — it signals "I couldn't find numeric structure here." Those
+outputs are filtered from cross-modal detection and not stored. The threshold
+(0.05) can be tuned but the behavior is right.
+
+### M4 success criteria — status
+- ✅ All processors see all input (dispatch to all available)
+- ✅ Significance is context-weighted (not just processor confidence)
+- ✅ Cross-modal concepts identified and linked (explicit 0.8-strength associations)
+- ✅ Throttle degrades breadth gracefully (pattern → numeric → text-only fallback)
+- ✅ 23 orchestrator tests passing; 137 total tests green
+
+### What's next (M5: Open-Stage Data Ingestion)
+The system is now ready for unstructured, uncurated data. M5 lifts the curriculum
+guardrails and lets Genesis process broad input through its developed machinery.
+This is where we start seeing whether the architecture produces anything interesting
+when exposed to the wider world.
+
+### Open threads
+- Cross-modal concept detection uses simple set intersection — could be made
+  more sophisticated (stemming, synonym grouping) when needed
+- Context scoring window is top-10 working memory items — may need tuning as
+  working memory grows denser
+- The `{docs,src` malformed directory — still needs cleanup

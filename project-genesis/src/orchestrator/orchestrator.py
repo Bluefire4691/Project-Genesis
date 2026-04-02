@@ -1,16 +1,17 @@
 """
 The Orchestrator — Central Hypervisor.
 
-Routes input to processors, evaluates outputs, manages memory decisions,
-and controls learning progression. It doesn't process data itself — it
-decides what gets processed, by whom, and what to do with the results.
+Coordinates all layers. Doesn't process data itself — decides what gets
+processed, by whom, and what to do with the results.
 
-Like the brain's executive function: coordination, not computation.
+M1: SurvivalOS integration — resource throttle gates which processors run.
+M3: InteractionLayer — expression, observation, community surface.
+M4: IntegrationLayer — all available processors see every input.
+    Significance is context-weighted. Cross-modal concepts are linked.
 
-M1 addition: SurvivalOS integration. The Orchestrator now consults
-Layer 0 at the start of each cycle. Throttle level determines which
-processors and memory operations are available. Resource-constrained
-cycles degrade gracefully rather than failing.
+The key shift in M4: the Orchestrator stops routing to one processor
+and starts synthesizing across all of them. Same input, multiple views,
+context determines what registers.
 """
 
 import json
@@ -24,6 +25,7 @@ from memory.memory import MemorySystem
 from curriculum.curriculum import CurriculumEngine
 from survival import SurvivalOS
 from interface import InteractionLayer
+from orchestrator.integration import IntegrationLayer
 
 
 class Orchestrator:
@@ -31,10 +33,7 @@ class Orchestrator:
     The central coordinating intelligence.
 
     Never crashes. Every decision is logged. Every error is data.
-
-    With a SurvivalOS attached (default), each cycle begins with a
-    resource tick. The orchestrator checks which capabilities are
-    available before dispatching to processors and memory.
+    All processors see all input. Context determines significance.
     """
 
     def __init__(
@@ -44,7 +43,7 @@ class Orchestrator:
         interaction: InteractionLayer | None = None,
     ):
         self.processors = {
-            "text": TextProcessor(),
+            "text":    TextProcessor(),
             "numeric": NumericProcessor(),
             "pattern": PatternProcessor(),
         }
@@ -55,31 +54,31 @@ class Orchestrator:
         self.error_count = 0
         self.log: list[str] = []
 
-        # Layer 0 — Survival OS.
         self.survival: SurvivalOS = survival if survival is not None else SurvivalOS()
-
-        # M3 — Interaction Layer (community surface + observer + interventions).
         self.interaction: InteractionLayer = (
             interaction if interaction is not None
             else InteractionLayer(self.memory)
         )
+        self.integrator = IntegrationLayer(self.memory)
 
     def _log(self, msg: str):
         self.log.append(msg)
         if self.verbose:
             print(f"  [{self.curriculum.current_stage.name}] {msg}")
 
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
     def process_input(self, input_type: str, data: Any) -> dict:
         """
-        Main entry point. Routes input, evaluates results, manages memory.
-        Never raises an exception — always returns a result dict.
+        Main entry point. Never raises — always returns a result dict.
         """
         self.cycle_count += 1
 
-        # Layer 0 tick — update resource state and directives
+        # Layer 0: resource tick
         survival_stats = self._survival_stats()
         survival_state = self.survival.tick(survival_stats)
-
         if self.verbose and survival_state["throttle"] != "NONE":
             self._log(
                 f"⚡ Survival OS: energy={survival_state['energy']:.2f} "
@@ -87,22 +86,17 @@ class Orchestrator:
                 f"pressure={survival_state['pressure']:.2f}"
             )
 
-        # M3 — Interaction layer tick
+        # M3: interaction tick
         interaction_state = self.interaction.cycle(survival_stats, self.cycle_count)
-
-        # If paused by the Observer, hold without processing
         if interaction_state["is_paused"]:
             self._log(
                 f"⏸  Paused — {interaction_state['pause_reason']}. "
                 f"Call orchestrator.interaction.resume() to continue."
             )
-            return {
-                "status": "paused",
-                "reason": interaction_state["pause_reason"],
-                "cycle": self.cycle_count,
-            }
+            return {"status": "paused", "reason": interaction_state["pause_reason"],
+                    "cycle": self.cycle_count}
 
-        # Check for pending stimulus (from stagnation intervention or human feed)
+        # Drain any pending stimulus (stagnation injection or human feed)
         pending = self.interaction.next_stimulus()
         if pending is not None:
             stimulus_type, stimulus_data = pending
@@ -114,118 +108,164 @@ class Orchestrator:
         except Exception as e:
             self.error_count += 1
             self._log(f"⚠ Orchestrator error (non-fatal): {e}")
-            return {
-                "status": "degraded",
-                "reason": str(e),
-                "cycle": self.cycle_count,
-            }
+            return {"status": "degraded", "reason": str(e), "cycle": self.cycle_count}
+
+    # ------------------------------------------------------------------
+    # M4 core: multi-processor dispatch + synthesis
+    # ------------------------------------------------------------------
 
     def _do_process(self, input_type: str, data: Any) -> dict:
-        """Internal processing — the actual work."""
-        # Resolve processor, respecting current throttle level
-        processor = self._select_processor(input_type, data)
-        processor_type = processor.name
+        """
+        Run all available processors, synthesize via IntegrationLayer,
+        store outputs with cross-modal associations.
+        """
+        # Determine which processors are available at current throttle
+        active = self._active_processors(input_type)
 
-        # Process
-        output = processor.process(data if processor_type != "text" or input_type == "text" else str(data))
-        self._log(f"→ {output.source} processor: {output.context}")
+        # Dispatch all active processors on the same input
+        outputs: list[ProcessorOutput] = []
+        for name, processor in active.items():
+            output = processor.process(data)
+            outputs.append(output)
+            if self.verbose and output.confidence > 0.1:
+                self._log(f"→ {output.source}: {output.context} "
+                          f"(conf={output.confidence:.2f})")
 
-        # Evaluate against curriculum (only if curriculum capability is available)
+        # Synthesize: context scoring + cross-modal detection
+        synthesis = self.integrator.synthesize(outputs, primary_source=_resolve_primary(input_type, active))
+
+        if synthesis.cross_modal_concepts and self.verbose:
+            self._log(f"  🔗 Cross-modal: {synthesis.cross_modal_concepts[:5]}")
+
+        # Curriculum eval on primary output
         if self.survival.can("curriculum"):
-            eval_score = self.curriculum.evaluate_processing(output)
+            eval_score = self.curriculum.evaluate_processing(synthesis.primary_output)
             self.curriculum.record_score(eval_score)
             self._log(
-                f"  Eval: {eval_score:.2f} | "
-                f"Stage avg: {self.curriculum.stage_scores[self.curriculum.current_stage]:.2f}"
+                f"  Eval: {eval_score:.2f} | significance: {synthesis.significance:.2f} "
+                f"| context: {synthesis.context_score:.2f}"
             )
         else:
-            eval_score = output.importance
-            self._log("  Curriculum eval skipped (resource pressure)")
+            eval_score = synthesis.significance
 
-        # Store in memory — conditionally on throttle level
+        # Store everything if resources allow
         if self.survival.can("memory_store"):
-            raw = str(data) if not isinstance(data, str) else data
-            memory_content = f"{raw} | {json.dumps(output.extracted, default=str)}"
-            self.memory.store(
-                key=output.suggested_key,
-                content=memory_content,
-                context=output.context,
-                source_type=output.source,
-                relevance=output.importance,
-            )
+            stored_keys = self._store_synthesis(synthesis, data)
             if self.survival.can("logging"):
-                self._log(f"  💾 Stored '{output.suggested_key}' (relevance: {output.importance:.2f})")
+                self._log(f"  💾 Stored {len(stored_keys)} memory key(s)")
 
-            # Update attention context
-            attention_terms = output.extracted.get("keywords", [])
-            if output.extracted.get("categories"):
-                attention_terms.extend(output.extracted["categories"])
-            if output.extracted.get("label"):
-                attention_terms.append(output.extracted["label"])
+            # Update attention with cross-modal concepts first, then primary terms
+            attention_terms = synthesis.cross_modal_concepts or synthesis.context_terms
             if attention_terms:
                 self.memory.update_attention(attention_terms)
         else:
+            stored_keys = []
             if self.survival.can("logging"):
                 self._log("  Memory storage skipped (emergency throttle)")
 
-        # Check for stage advancement (only when not in survival mode)
+        # Stage advancement
         if self.survival.can("curriculum") and self.curriculum.should_advance():
-            advanced = self.curriculum.advance()
-            if advanced:
-                self._log(f"  🎓 ADVANCED to stage {self.curriculum.current_stage.name}!")
+            if self.curriculum.advance() and self.verbose:
+                self._log(f"  🎓 ADVANCED to {self.curriculum.current_stage.name}!")
 
         return {
             "status": "processed",
-            "output": output.extracted,
-            "importance": output.importance,
+            "output": synthesis.primary_output.extracted,
+            "significance": synthesis.significance,
+            "context_score": synthesis.context_score,
+            "cross_modal_concepts": synthesis.cross_modal_concepts,
+            "processors_run": synthesis.processors_run,
             "eval_score": eval_score,
             "stage": self.curriculum.current_stage.name,
             "cycle": self.cycle_count,
             "throttle": self.survival.resource.throttle_level.name,
         }
 
-    def _select_processor(self, input_type: str, data: Any):
+    def _active_processors(self, input_type: str) -> dict:
         """
-        Select a processor, degrading gracefully under resource pressure.
+        Return all processors available at current throttle level.
 
-        If the requested processor is unavailable (throttled), fall back
-        to the next available one. Text is always the final fallback.
+        The primary (input_type) is always included if text is available.
+        Under heavy throttle, only text survives — that's the correct
+        degradation: lose breadth before losing function.
         """
-        requested = self.processors.get(input_type)
+        active = {}
+        for name, processor in self.processors.items():
+            if self.survival.can(name):
+                active[name] = processor
 
-        # Check if the requested processor type is available
-        if requested and self.survival.can(input_type):
-            return requested
+        if not active:
+            # Ultimate fallback — text always available unless something is broken
+            active["text"] = self.processors["text"]
 
-        # Fallback chain: numeric → text, pattern → text
-        if not self.survival.can(input_type) and input_type != "text":
-            self._log(
-                f"⚠ Processor '{input_type}' unavailable (throttle: "
-                f"{self.survival.resource.throttle_level.name}) — falling back to text"
+        return active
+
+    def _store_synthesis(self, synthesis, raw_data: Any) -> list[str]:
+        """
+        Store all processor outputs, linking cross-modal outputs by association.
+
+        Primary output → main memory key.
+        Secondary outputs → stored at their natural keys, linked to primary.
+        Cross-modal associations → explicit high-strength links.
+        """
+        raw_str = str(raw_data) if not isinstance(raw_data, str) else raw_data
+        stored_keys: list[str] = []
+
+        # Store primary
+        primary = synthesis.primary_output
+        primary_content = f"{raw_str} | {json.dumps(primary.extracted, default=str)}"
+        self.memory.store(
+            key=primary.suggested_key,
+            content=primary_content,
+            context=primary.context,
+            source_type=primary.source,
+            relevance=synthesis.significance,
+        )
+        stored_keys.append(primary.suggested_key)
+
+        # Store secondary outputs (only if confidence meaningful)
+        secondary_keys: list[str] = []
+        for sec in synthesis.secondary_outputs:
+            if sec.confidence < 0.05:
+                continue  # pure noise — not worth storing
+            sec_content = f"{raw_str} | {json.dumps(sec.extracted, default=str)}"
+            self.memory.store(
+                key=sec.suggested_key,
+                content=sec_content,
+                context=sec.context,
+                source_type=sec.source,
+                relevance=sec.confidence * 0.6,  # secondary relevance discounted
             )
-            return self.processors["text"]
+            stored_keys.append(sec.suggested_key)
+            secondary_keys.append(sec.suggested_key)
 
-        # Unknown type or no processor found
-        if not requested:
-            self._log(f"⚠ No processor for '{input_type}' — routing to text as fallback")
-        return self.processors["text"]
+        # Cross-modal association: link all stored keys from this input
+        # These are different views of the same thing — strong explicit link
+        all_keys = [primary.suggested_key] + secondary_keys
+        if len(all_keys) > 1:
+            for i, key_a in enumerate(all_keys):
+                for key_b in all_keys[i + 1:]:
+                    self.memory.associate(key_a, key_b, strength=0.8)
+
+        return stored_keys
+
+    # ------------------------------------------------------------------
+    # Query
+    # ------------------------------------------------------------------
 
     def query(self, question: str) -> dict:
         """Ask the system a question based on what it has learned."""
         self._log(f"❓ Query: '{question}'")
 
-        # Memory search respects throttle level
         if not self.survival.can("memory_search"):
-            self._log("  Memory search unavailable (resource pressure)")
-            return {"answer": "System under resource pressure — memory search unavailable.", "memories_used": 0}
+            return {"answer": "System under resource pressure — memory search unavailable.",
+                    "memories_used": 0}
 
         results = self.memory.search(question, top_k=5)
-
         if not results:
-            self._log("  No relevant memories found.")
-            return {"answer": "I don't have enough experience to answer that.", "memories_used": 0}
+            return {"answer": "I don't have enough experience to answer that.",
+                    "memories_used": 0}
 
-        self._log(f"  Found {len(results)} relevant memories:")
         memories_used = []
         for key, mem in results:
             self._log(f"    • {key}: {mem.context} (relevance: {mem.relevance:.2f})")
@@ -236,6 +276,10 @@ class Orchestrator:
             "memories_used": len(results),
             "relevant_memories": memories_used,
         }
+
+    # ------------------------------------------------------------------
+    # Curriculum runner
+    # ------------------------------------------------------------------
 
     def run_curriculum(self):
         """Run through the current stage's curriculum."""
@@ -248,13 +292,15 @@ class Orchestrator:
         print(f"\n{'='*60}")
         print(f"  STAGE: {stage_name}")
         print(f"{'='*60}")
-
         for i, item in enumerate(items):
             print(f"\n--- Item {i+1}/{len(items)} ---")
             self.process_input(item["type"], item["data"])
-
         print(f"\n  Stage {stage_name} complete.")
         print(f"  {json.dumps(self.curriculum.status(), indent=2)}")
+
+    # ------------------------------------------------------------------
+    # Status
+    # ------------------------------------------------------------------
 
     def full_status(self) -> dict:
         status = {
@@ -269,7 +315,6 @@ class Orchestrator:
         return status
 
     def _survival_stats(self) -> dict:
-        """Build the stats dict for DirectiveEngine.update()."""
         curriculum_status = self.curriculum.status()
         return {
             "error_count": self.error_count,
@@ -283,3 +328,14 @@ class Orchestrator:
                 str(self.curriculum.current_stage), 0.5
             ),
         }
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+def _resolve_primary(input_type: str, active: dict) -> str:
+    """Return the name of the primary processor — the one matching input_type, or text."""
+    if input_type in active:
+        return input_type
+    return "text"
