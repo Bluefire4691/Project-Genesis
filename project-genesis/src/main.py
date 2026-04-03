@@ -201,6 +201,9 @@ def run_interactive(brain):
     print("    feed:<type>:<data>   — give Genesis new input")
     print("    express              — show current expression snapshot")
     print("    status               — full system status")
+    print("    relations:<concept>  — what Genesis knows about a concept")
+    print("    path:<A>:<B>         — relation chain from A to B")
+    print("    causal               — show all causal chains")
     print("    archive              — list archive stats + snapshots")
     print("    archive:<domain>     — query archive by domain tag")
     print("    snapshot:<label>     — save named attention snapshot")
@@ -230,6 +233,38 @@ def run_interactive(brain):
                 "observer": s.get("interaction_layer", {}).get("observer", {}).get("state"),
                 "energy": s.get("survival_os", {}).get("resource", {}).get("energy"),
             }, indent=2))
+        elif user_input.lower().startswith("relations:"):
+            concept = user_input.split(":", 1)[1].strip()
+            info = brain.relations.query_concept(concept)
+            print(f"  '{concept}' as subject ({len(info['as_subject'])} relations):")
+            for r in info["as_subject"][:8]:
+                print(f"    → {r['relation']} → {r['object']}  [{r['confidence']:.2f}]")
+            print(f"  '{concept}' as object ({len(info['as_object'])} relations):")
+            for r in info["as_object"][:8]:
+                print(f"    {r['subject']} → {r['relation']} →   [{r['confidence']:.2f}]")
+        elif user_input.lower().startswith("path:"):
+            parts = user_input.split(":", 2)
+            if len(parts) == 3:
+                paths = brain.relations.find_path(parts[1].strip(), parts[2].strip())
+                if not paths:
+                    print(f"  No path found from '{parts[1]}' to '{parts[2]}'.")
+                else:
+                    for i, path in enumerate(paths, 1):
+                        chain = " → ".join(
+                            f"{s['from']} —[{s['relation']}]→ {s['to']}"
+                            for s in path
+                        )
+                        print(f"  Path {i}: {chain}")
+            else:
+                print("  Usage: path:<concept_A>:<concept_B>")
+        elif user_input.lower() == "causal":
+            chains = brain.relations.causal_chains(min_confidence=0.7)
+            if not chains:
+                print("  No causal chains recorded yet.")
+            else:
+                print(f"  {len(chains)} causal chain(s):")
+                for c in chains[:15]:
+                    print(f"    {c['subject']} → CAUSES → {c['object']}  [{c['confidence']:.2f}]")
         elif user_input.lower() == "save":
             brain.save_session()
             print("  Session saved.")

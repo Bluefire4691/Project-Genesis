@@ -28,6 +28,7 @@ from utils.types import ProcessorOutput
 from processors import TextProcessor, NumericProcessor, PatternProcessor
 from memory.memory import MemorySystem
 from memory.archive import ArchiveStore
+from memory.relations import RelationGraph
 from persistence.session import SessionManager
 from curriculum.curriculum import CurriculumEngine
 from survival import SurvivalOS
@@ -82,9 +83,10 @@ class Orchestrator:
         # Unique session identifier — used by ArchiveStore for provenance
         self.session_id = str(uuid.uuid4())[:8]
 
-        # Archive and session manager share the memory DB connection
+        # Archive, relation graph, and session manager share the memory DB connection
         _conn = self.memory._long_term.conn
         self.archive = ArchiveStore(_conn)
+        self.relations = RelationGraph(_conn)
         self._session_manager = SessionManager(_conn)
 
         self.survival: SurvivalOS = survival if survival is not None else SurvivalOS()
@@ -300,6 +302,20 @@ class Orchestrator:
                 source_type=src,
             )
 
+        # Relation extraction — store typed triples from text outputs
+        for output in [primary] + synthesis.secondary_outputs:
+            if output.source != "text":
+                continue
+            for rel in output.extracted.get("relations", []):
+                self.relations.add(
+                    subject=rel["subject"],
+                    rel_type=rel["relation"],
+                    obj=rel["object"],
+                    confidence=rel["confidence"],
+                    source_key=output.suggested_key,
+                    session_id=self.session_id,
+                )
+
         return stored_keys
 
     # ------------------------------------------------------------------
@@ -321,19 +337,44 @@ class Orchestrator:
                     "memories_used": 0}
 
         results = self.memory.search(question, top_k=5)
-        if not results:
+
+        # Also check relation graph for any known concept
+        query_words = [w for w in question.lower().split() if len(w) >= 3]
+        known_relations: list[dict] = []
+        seen_concepts: set[str] = set()
+        for word in query_words[:4]:
+            if word in seen_concepts:
+                continue
+            seen_concepts.add(word)
+            concept_info = self.relations.query_concept(word, min_confidence=0.6)
+            as_subj = concept_info["as_subject"]
+            as_obj  = concept_info["as_object"]
+            if as_subj or as_obj:
+                known_relations.append({
+                    "concept": word,
+                    "as_subject": as_subj[:3],
+                    "as_object":  as_obj[:3],
+                })
+
+        if not results and not known_relations:
             return {"answer": "I don't have enough experience to answer that.",
-                    "memories_used": 0}
+                    "memories_used": 0, "relations": []}
 
         memories_used = []
         for key, mem in results:
             self._log(f"    • {key}: {mem.context} (relevance: {mem.relevance:.2f})")
             memories_used.append(mem.to_dict() | {"key": key})
 
+        if known_relations and self.verbose:
+            for kr in known_relations:
+                self._log(f"    ⟳ Relations for '{kr['concept']}': "
+                          f"{len(kr['as_subject'])} outgoing, {len(kr['as_object'])} incoming")
+
         return {
             "answer": f"Based on {len(results)} memories.",
             "memories_used": len(results),
             "relevant_memories": memories_used,
+            "relations": known_relations,
         }
 
     # ------------------------------------------------------------------
@@ -369,6 +410,7 @@ class Orchestrator:
             "curriculum": self.curriculum.status(),
             "memory": self.memory.stats(),
             "archive": self.archive.stats(),
+            "relations": self.relations.stats(),
             "processors": list(self.processors.keys()),
         }
         status.update(self.survival.report())

@@ -2,11 +2,21 @@
 
 import sys
 import os
+import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from curriculum.open_stage import DataStream, advance_to_open, _POOL
 from orchestrator.orchestrator import Orchestrator
 from utils.types import Stage
+
+
+def _brain(**kwargs) -> Orchestrator:
+    """Fresh temp-DB brain so count-based assertions are isolation-safe."""
+    if "db_path" not in kwargs:
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        kwargs["db_path"] = tmp.name
+    return Orchestrator(verbose=False, **kwargs)
 
 
 # ==================================================================
@@ -215,7 +225,7 @@ def test_open_stage_processes_pattern_items():
 
 
 def test_open_stage_accumulates_memories():
-    brain = Orchestrator(verbose=False)
+    brain = _brain()
     brain.curriculum.current_stage = Stage.OPEN
     stream = DataStream(seed=1)
     before = brain.memory.stats()["total_stored"]
