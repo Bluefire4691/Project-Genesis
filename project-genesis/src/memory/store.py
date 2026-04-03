@@ -259,6 +259,11 @@ class LongTermStore:
             "db_path": self._db_path,
         }
 
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """Expose the underlying SQLite connection for co-located subsystems."""
+        return self._conn
+
     def close(self) -> None:
         """Close the database connection cleanly."""
         self._conn.close()

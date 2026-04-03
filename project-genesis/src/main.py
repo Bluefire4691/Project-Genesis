@@ -14,6 +14,8 @@ Usage:
     python src/main.py --quiet           # Minimal output
     python src/main.py --interactive     # Interactive query mode after run
     python src/main.py --open-only       # Skip curriculum, go straight to OPEN
+    python src/main.py --resume          # Resume from last checkpoint
+    python src/main.py --snapshot label  # Save a named snapshot at end
 """
 
 import sys
@@ -199,6 +201,10 @@ def run_interactive(brain):
     print("    feed:<type>:<data>   — give Genesis new input")
     print("    express              — show current expression snapshot")
     print("    status               — full system status")
+    print("    archive              — list archive stats + snapshots")
+    print("    archive:<domain>     — query archive by domain tag")
+    print("    snapshot:<label>     — save named attention snapshot")
+    print("    save                 — checkpoint session")
     print("    pause / resume       — manual pause/resume")
     print("    quit                 — exit")
     print()
@@ -224,6 +230,28 @@ def run_interactive(brain):
                 "observer": s.get("interaction_layer", {}).get("observer", {}).get("state"),
                 "energy": s.get("survival_os", {}).get("resource", {}).get("energy"),
             }, indent=2))
+        elif user_input.lower() == "save":
+            brain.save_session()
+            print("  Session saved.")
+        elif user_input.lower() == "archive":
+            stats = brain.archive.stats()
+            print(f"  Archive: {stats['total_tagged']} tagged, "
+                  f"{stats['total_snapshots']} snapshots, "
+                  f"avg sig={stats['avg_significance']:.2f}")
+            for snap in brain.archive.list_snapshots()[:5]:
+                print(f"    [{snap['snapshot_id']}] '{snap['label']}' "
+                      f"— {snap['key_count']} keys (session {snap['session_id']})")
+        elif user_input.lower().startswith("archive:"):
+            domain = user_input.split(":", 1)[1].strip()
+            results = brain.archive.query(domain=domain, limit=10)
+            print(f"  {len(results)} memories tagged '{domain}':")
+            for r in results[:10]:
+                print(f"    [{r['significance']:.2f}] {r['key']} — {r['domain_tags']}")
+        elif user_input.lower().startswith("snapshot:"):
+            label = user_input.split(":", 1)[1].strip()
+            wm_keys = list(brain.memory.memories.keys())
+            snap_id = brain.archive.snapshot(label, wm_keys, brain.session_id)
+            print(f"  Snapshot '{label}' saved (id={snap_id}, {len(wm_keys)} keys).")
         elif user_input.lower() == "pause":
             brain.interaction.pause("manual")
             print("  Paused.")
@@ -260,35 +288,58 @@ def main():
     verbose = True
     interactive = False
     open_only = False
+    resume = False
+    snapshot_label = None
 
-    for arg in sys.argv[1:]:
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        arg = args[i]
         if arg == "--quiet":
             verbose = False
         elif arg == "--interactive":
             interactive = True
         elif arg == "--open-only":
             open_only = True
+        elif arg == "--resume":
+            resume = True
         elif arg.startswith("--cycles="):
             try:
                 cycles = int(arg.split("=")[1])
             except ValueError:
                 pass
-        elif arg == "--cycles" and sys.argv.index(arg) + 1 < len(sys.argv):
+        elif arg == "--cycles" and i + 1 < len(args):
             try:
-                cycles = int(sys.argv[sys.argv.index(arg) + 1])
+                cycles = int(args[i + 1])
+                i += 1
             except (ValueError, IndexError):
                 pass
+        elif arg == "--snapshot" and i + 1 < len(args):
+            snapshot_label = args[i + 1]
+            i += 1
+        i += 1
 
-    brain = Orchestrator(verbose=verbose)
+    brain = Orchestrator(verbose=verbose, resume=resume)
 
-    if not open_only:
+    if resume and brain.curriculum.current_stage == Stage.OPEN:
+        print(f"  [RESUME] Picking up from cycle {brain.cycle_count} "
+              f"in OPEN stage with {len(brain.memory.memories)} warm memories.")
+    elif not open_only:
         run_curriculum_pipeline(brain, verbose=verbose)
     else:
-        # Force straight to OPEN
         brain.curriculum.current_stage = Stage.OPEN
         print("  Skipping curriculum — starting at OPEN stage.")
 
     run_open_stage(brain, n_cycles=cycles, verbose=verbose)
+
+    # Optional named snapshot of the current attention state
+    if snapshot_label:
+        wm_keys = list(brain.memory.memories.keys())
+        snap_id = brain.archive.snapshot(snapshot_label, wm_keys, brain.session_id)
+        print(f"  Snapshot '{snapshot_label}' saved (id={snap_id}, {len(wm_keys)} keys).")
+
+    # Auto-save session after every run
+    brain.save_session()
 
     if interactive:
         run_interactive(brain)

@@ -8,6 +8,10 @@ M1: SurvivalOS integration — resource throttle gates which processors run.
 M3: InteractionLayer — expression, observation, community surface.
 M4: IntegrationLayer — all available processors see every input.
     Significance is context-weighted. Cross-modal concepts are linked.
+M6: Session persistence + archive tagging.
+    resume=True restores cycle_count, curriculum stage, and working memory
+    warm-start from last checkpoint. ArchiveStore tags every stored memory
+    with significance and domain for cross-session retrieval.
 
 The key shift in M4: the Orchestrator stops routing to one processor
 and starts synthesizing across all of them. Same input, multiple views,
@@ -15,6 +19,7 @@ context determines what registers.
 """
 
 import json
+import uuid
 from typing import Any
 
 import sys, os
@@ -22,6 +27,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.types import ProcessorOutput
 from processors import TextProcessor, NumericProcessor, PatternProcessor
 from memory.memory import MemorySystem
+from memory.archive import ArchiveStore
+from persistence.session import SessionManager
 from curriculum.curriculum import CurriculumEngine
 from survival import SurvivalOS
 from interface import InteractionLayer
@@ -34,11 +41,27 @@ class Orchestrator:
 
     Never crashes. Every decision is logged. Every error is data.
     All processors see all input. Context determines significance.
+
+    Parameters
+    ----------
+    verbose : bool
+        Print per-cycle diagnostics.
+    db_path : str | None
+        Path to the SQLite memory DB. None = use MemorySystem default.
+    resume : bool
+        If True and a checkpoint exists, restore previous session state
+        (cycle_count, curriculum stage, working memory warm-start).
+    survival : SurvivalOS | None
+        Inject a pre-built SurvivalOS (mainly for testing).
+    interaction : InteractionLayer | None
+        Inject a pre-built InteractionLayer (mainly for testing).
     """
 
     def __init__(
         self,
         verbose: bool = True,
+        db_path: str | None = None,
+        resume: bool = False,
         survival: SurvivalOS | None = None,
         interaction: InteractionLayer | None = None,
     ):
@@ -47,12 +70,22 @@ class Orchestrator:
             "numeric": NumericProcessor(),
             "pattern": PatternProcessor(),
         }
-        self.memory = MemorySystem()
+
+        # Memory system — optionally with explicit DB path
+        self.memory = MemorySystem(db_path=db_path) if db_path else MemorySystem()
         self.curriculum = CurriculumEngine()
         self.verbose = verbose
         self.cycle_count = 0
         self.error_count = 0
         self.log: list[str] = []
+
+        # Unique session identifier — used by ArchiveStore for provenance
+        self.session_id = str(uuid.uuid4())[:8]
+
+        # Archive and session manager share the memory DB connection
+        _conn = self.memory._long_term.conn
+        self.archive = ArchiveStore(_conn)
+        self._session_manager = SessionManager(_conn)
 
         self.survival: SurvivalOS = survival if survival is not None else SurvivalOS()
         self.interaction: InteractionLayer = (
@@ -60,6 +93,16 @@ class Orchestrator:
             else InteractionLayer(self.memory)
         )
         self.integrator = IntegrationLayer(self.memory)
+
+        # Restore previous session state if requested
+        if resume:
+            restored = self._session_manager.restore(self)
+            if restored and self.verbose:
+                print(
+                    f"  [SESSION] Restored: cycle={self.cycle_count} "
+                    f"stage={self.curriculum.current_stage.name} "
+                    f"wm={len(self.memory.memories)} memories warm-started"
+                )
 
     def _log(self, msg: str):
         self.log.append(msg)
@@ -247,11 +290,27 @@ class Orchestrator:
                 for key_b in all_keys[i + 1:]:
                     self.memory.associate(key_a, key_b, strength=0.8)
 
+        # Archive tagging — every stored memory gets significance + domain
+        for key in stored_keys:
+            src = primary.source if key == primary.suggested_key else _key_source(key)
+            self.archive.tag(
+                key=key,
+                significance=synthesis.significance,
+                session_id=self.session_id,
+                source_type=src,
+            )
+
         return stored_keys
 
     # ------------------------------------------------------------------
     # Query
     # ------------------------------------------------------------------
+
+    def save_session(self) -> None:
+        """Checkpoint current state to the DB for restore on next startup."""
+        self._session_manager.save(self)
+        if self.verbose:
+            self._log(f"💾 Session saved (cycle={self.cycle_count})")
 
     def query(self, question: str) -> dict:
         """Ask the system a question based on what it has learned."""
@@ -306,8 +365,10 @@ class Orchestrator:
         status = {
             "cycles": self.cycle_count,
             "error_count": self.error_count,
+            "session_id": self.session_id,
             "curriculum": self.curriculum.status(),
             "memory": self.memory.stats(),
+            "archive": self.archive.stats(),
             "processors": list(self.processors.keys()),
         }
         status.update(self.survival.report())
@@ -338,4 +399,12 @@ def _resolve_primary(input_type: str, active: dict) -> str:
     """Return the name of the primary processor — the one matching input_type, or text."""
     if input_type in active:
         return input_type
+    return "text"
+
+
+def _key_source(key: str) -> str:
+    """Infer source type from a memory key prefix (e.g. 'text:', 'pattern:')."""
+    for src in ("text", "numeric", "pattern"):
+        if key.startswith(f"{src}:"):
+            return src
     return "text"

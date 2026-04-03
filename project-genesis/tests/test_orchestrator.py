@@ -12,6 +12,12 @@ import tempfile
 
 
 def _brain(**kwargs) -> Orchestrator:
+    # Use a fresh temp DB per test so count-based assertions aren't
+    # affected by accumulated data from previous runs.
+    if "db_path" not in kwargs:
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        kwargs["db_path"] = tmp.name
     return Orchestrator(verbose=False, **kwargs)
 
 

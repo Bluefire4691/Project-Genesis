@@ -590,5 +590,194 @@ M6 options (no decisions made yet):
 ### Open threads
 - The `{docs,src` malformed directory — still needs cleanup (tarball artifact)
 - Observer thresholds still default values — need real run data to tune
-- Stagnation stimulus pool is generic — could become context-aware in M6
+- Stagnation stimulus pool is generic — could become context-aware in M7
 - Cross-modal detection still uses simple set intersection (no stemming/synonyms)
+
+---
+
+## Session 7 — April 3, 2026
+
+**Platform:** Claude Code (CLI)
+**Branch:** `claude/extract-genesis-repo-fn5vW`
+
+### What happened
+M6 built and tested. Three capabilities added: session persistence (survive restart),
+rich pattern recognition (structural mathematics), and an archive (cross-session
+reference and retrieval). 270 total tests, all green.
+
+Jacob's direction: "persistent with rich pattern recognition and archive data for
+reference and future use."
+
+### What was built
+
+**`src/processors/pattern.py`** — complete rewrite, rich structural detection
+
+Before M6, PatternProcessor found: repeating subsequences, sorted order, basic
+anomalies (>2σ). That's surface-level.
+
+After M6, it detects the underlying mathematical structure:
+
+- **Arithmetic progression**: constant difference, confidence tied to coefficient
+  of variation of the differences. `[2, 4, 6, 8, 10]` → "arithmetic (step=2)"
+- **Geometric progression**: constant ratio, tighter CV tolerance (×5 penalty
+  because geometric sequences are less noisy). `[1, 3, 9, 27]` → "geometric (ratio=3)"
+- **Fibonacci-like**: each element ≈ sum of previous two. Works for any seed, any
+  scale — `[2, 2, 4, 6, 10, 16]` passes. Requires ≥5 elements to be meaningful.
+- **Power sequences**: checks n² and n³ alignment with 5% error tolerance.
+  `[1, 4, 9, 16, 25]` → "power sequence (n^2)"
+- **Periodic**: tolerance-based cycle detection across periods 2..N/2. Returns
+  best-fit period and confidence. Doesn't require exact repetition — handles
+  real-world oscillation with noise.
+- **Exact repeating subsequence**: carries forward from M5 (works on numeric and
+  symbolic/categorical sequences alike)
+- **Anomaly detection**: >2σ from mean (same logic, now surfaced per-pattern)
+- **Trend classification**: strictly_increasing, strictly_decreasing, constant,
+  oscillating, generally_increasing, generally_decreasing, variable. Computed
+  from sign distribution of consecutive differences.
+- **Statistical profile**: mean, std, range, coefficient of variation, trend slope
+  (least-squares linear regression). Always included — gives the Observer and
+  the archive a quantitative fingerprint for every sequence.
+
+Multi-pattern output: ALL patterns found are reported, not just the first. Confidence
+= max across all detected patterns. The processor tests for most-specific first
+(Fibonacci before geometric, geometric before arithmetic) to avoid false positives.
+
+Symbolic (non-numeric) sequences get n-gram frequency analysis and dominant bigram
+detection.
+
+**`src/memory/archive.py`** — ArchiveStore
+
+Domain tagging on top of LongTermStore. Shares the same sqlite3.Connection (no
+extra DB file, no multi-writer contention).
+
+New tables:
+- `archive_metadata`: (key, session_id, significance, domain_tags, archived_at)
+- `archive_snapshots`: (snapshot_id, label, session_id, created_at, memory_keys JSON)
+
+Auto-tags by source type:
+- text → [language, symbolic]
+- numeric → [quantitative, measurement]
+- pattern → [structural, sequential]
+
+Manual tags accumulate (re-tagging merges, never overwrites).
+Significance takes the max of old and new on re-tag — relevance only grows.
+
+`query(domain, min_significance, since_ts, session_id, limit)` — all filters
+optional, combine freely.
+
+`snapshot(label, memory_keys, session_id)` — capture the current working memory
+key list as a named reference point. `retrieve_snapshot(id)` brings it back.
+Useful for comparing what Genesis was attending to across sessions.
+
+**`src/persistence/session.py`** — SessionManager + `src/persistence/__init__.py`
+
+Checkpoint/restore for cognitive continuity across process restarts.
+
+Saves to a `session_state` key-value table in the same DB:
+- `cycle_count` — continuity of experience counter
+- `curriculum_stage` — don't force FOUNDATION re-run after reaching OPEN
+- `warm_start_keys` — top-30 working memory keys by relevance, for restore
+- `session_id` — provenance tracking
+
+`restore(brain)` promotes the warm-start keys from SQLite into working memory
+(same two-tier recall path used normally). Attention picks up close to where
+it left off without freezing state — the system re-evaluates context naturally.
+
+Directive satisfaction intentionally not saved. It re-converges in a few cycles
+from live resource/memory stats. Pickling live state across code changes is
+fragile; convergence is fast and authentic.
+
+**`src/orchestrator/orchestrator.py`** — M6 integration
+
+New parameters: `db_path` (explicit DB path) and `resume` (trigger restore on init).
+New attributes: `session_id` (UUID, 8 chars), `archive` (ArchiveStore), `_session_manager`.
+New method: `save_session()` — manual checkpoint + optional verbose log.
+
+`_store_synthesis()` now calls `archive.tag()` for every stored key with
+significance + source_type. The archive grows automatically as Genesis processes.
+
+`full_status()` now includes archive stats.
+
+**`src/main.py`** — updated CLI
+
+New flags:
+- `--resume` — restore from last checkpoint; skips curriculum if already at OPEN
+- `--snapshot <label>` — save a named attention snapshot at end of run
+
+`save_session()` called automatically at end of every run. Next run with `--resume`
+picks up at the right cycle count and curriculum stage.
+
+Interactive commands added: `archive`, `archive:<domain>`, `snapshot:<label>`, `save`.
+
+**Test isolation fix — `tests/test_orchestrator.py`**
+
+`_brain()` now creates a fresh tempfile DB per test. Previously it used the shared
+`data/genesis_memory.db`, which accumulated entries across runs. Count-based
+assertions (`after >= before + 1`) became flaky once keys already existed from
+prior runs. Tempfile DB ensures each test starts clean, consistent with how the
+memory, interface, and open-stage tests work.
+
+### Decisions made
+
+**One DB file, shared connection:**
+ArchiveStore and SessionManager both receive the sqlite3.Connection object from
+LongTermStore rather than opening separate connections to the same file. This avoids
+any multi-writer contention and keeps all Genesis state in one place:
+`data/genesis_memory.db` (or whatever db_path is set to).
+
+**Warm-start, not full state restore:**
+Working memory is warm-started by promoting the top-30 keys from SQLite into
+working memory via the normal recall path. The attention context re-establishes
+itself naturally rather than freezing the exact working memory state. This is
+more robust (no pickled object format to maintain) and more authentic — Genesis
+re-evaluates its context at startup rather than loading a snapshot of what it
+"felt" before.
+
+**Archive tags accumulate, significance only grows:**
+Re-tagging a key adds to its tag set (never overwrites). Significance is MAX of
+existing and new. This means archive entries only become more specific and more
+significant over time, never less. Consistent with total-retention philosophy.
+
+**Multi-pattern output, most-specific first:**
+Detection order: Fibonacci → power → geometric → arithmetic → periodic → repeating.
+This prevents a geometric sequence (e.g. [1, 2, 4, 8]) from being mis-classified
+as arithmetic just because the differences also look regular. The most specific
+structural pattern wins, but all detected patterns are reported.
+
+**Statistical profile always included:**
+Stats (mean, std, range, coeff_variation, trend_slope) are computed for every numeric
+sequence regardless of what patterns are found. The profile gives a quantitative
+fingerprint that Archive queries, the Observer, and future analysis can use without
+needing to re-process the raw data.
+
+### M6 success criteria — status
+- ✅ Session survives restart: cycle_count, stage, and working memory warm-start restored
+- ✅ Rich pattern recognition: arithmetic, geometric, Fibonacci, power, periodic, trend, stats
+- ✅ Archive: auto-tagging on every stored memory, queryable by domain/significance/time/session
+- ✅ Named snapshots: capture + retrieve attention state at any point in time
+- ✅ --resume flag: one flag picks up where the last run left off
+- ✅ 270 tests passing (98 new), all green
+
+### What's next (M7 options)
+Genesis now has: survival pressure, total-retention memory, interaction layer,
+multi-processor integration, open-stage data, session persistence, rich pattern
+detection, and a cross-session archive. The system runs, persists, and can be
+resumed.
+
+M7 options:
+- **Richer TextProcessor**: named entity extraction, topic modeling, causal language
+  detection ("X caused Y", "without X, Y happened")
+- **Context-aware stimuli**: Observer injects stagnation stimuli related to what
+  Genesis was last attending to (rather than generic pool)
+- **REST interface**: HTTP endpoint for longer-running session inspection without
+  entering interactive mode
+- **Cross-session analysis**: query the archive across sessions to find what topics
+  have grown in significance over time
+- **Processor confidence calibration**: track processor confidence over time to detect
+  when the pattern processor is consistently over- or under-confident
+
+### Open threads
+- The `{docs,src` malformed directory — still needs cleanup (tarball artifact)
+- Observer thresholds still defaults — need real multi-session data to tune
+- Cross-modal detection uses simple set intersection (no stemming/synonyms)
+- Pattern processor's anomaly detection requires ≥5 elements for reliable σ estimates
