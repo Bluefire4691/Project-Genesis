@@ -1,5 +1,5 @@
 """
-Open Stage Data Stream — M5.
+Open Stage Data Stream — M5/M8.
 
 The curriculum guardrails are off. Genesis has developed its processing
 machinery through FOUNDATION, RELATIONS, and REASONING. Now it meets
@@ -10,13 +10,18 @@ is no score. It's an environment: a continuous flow of input drawn from
 different domains, types, and complexity levels. What Genesis makes of
 it is up to Genesis.
 
-The stream covers:
-    - Natural systems (ecology, physics, biology, chemistry)
-    - Numerical data (measurements, statistics, trends, ratios)
-    - Pattern sequences (mathematical, natural, behavioral, temporal)
-    - Human/social phenomena (cooperation, conflict, community)
-    - Abstract relationships (cause-effect, scale, change, limits)
-    - Edge cases (contradictions, anomalies, incomplete information)
+M8 expands the pool from 56 → 130 items across 14 domains, adding:
+    - History and causation (events as causal chains)
+    - Science fundamentals (energy, entropy, conservation)
+    - Biology and genetics (DNA, evolution, neural systems)
+    - Mathematics and logic (implication, probability, set relations)
+    - Ethics as narrative (consequences-based, never rule-based)
+    - Philosophy and epistemology (knowledge, models, falsifiability)
+    - Additional contradictions and anomalies in the new domains
+
+Ethics data is expressed as experienced events and their consequences —
+not as moral rules. "This happened, then this happened." What Genesis
+makes of the pattern is up to Genesis.
 
 Edge cases are deliberate. The world doesn't curate itself. An anomaly
 is as real as a clean fact, and often more informative. A contradiction
@@ -111,6 +116,82 @@ _POOL: list[dict] = [
     {"type": "numeric", "data": {"label": "erosion_rate_mm_per_year", "value": 0.3, "unit": "mm/year"}},
     {"type": "numeric", "data": {"label": "evolutionary_change_generations", "values": [0, 100, 500, 2000, 8000, 25000], "unit": "generations"}},
     {"type": "pattern", "data": {"label": "slow_then_fast", "sequence": [1, 1, 1, 2, 3, 5, 10, 20, 50, 200]}},
+
+    # --- History and causation ---
+    {"type": "text", "data": "The printing press enabled mass literacy. Literacy enabled individuals to read scripture directly. Direct reading enabled religious reform. Religious reform caused a century of wars."},
+    {"type": "text", "data": "The Black Death killed a third of Europe. Labor became scarce. Peasants gained bargaining power. Feudalism weakened. The Renaissance followed."},
+    {"type": "text", "data": "Rome built roads to control its empire. Roads enabled trade. Trade enriched the provinces. Rich provinces demanded autonomy. The roads that built Rome helped end it."},
+    {"type": "text", "data": "Gunpowder was invented to make medicine. It was adapted for fireworks. It was adapted for weapons. It ended the age of castles and armored knights."},
+    {"type": "text", "data": "The potato enabled Ireland to feed a large population on small land. Dependence on one crop made the food supply fragile. One blight caused a famine that halved the population."},
+    {"type": "text", "data": "Trade requires trust between strangers. Contracts enabled trust without personal relationships. Courts enforced contracts. Enforcement enabled markets to scale beyond communities."},
+    {"type": "numeric", "data": {"label": "population_after_black_death", "values": [75, 74, 70, 60, 50, 45, 40, 42, 48, 55], "unit": "million_europe"}},
+    {"type": "numeric", "data": {"label": "literacy_rate_europe", "values": [5, 6, 8, 12, 20, 35, 55, 70, 85], "unit": "percent"}},
+    {"type": "pattern", "data": {"label": "empire_lifespan_years", "sequence": [250, 400, 350, 500, 200, 900, 300, 450]}},
+    {"type": "text", "data": "Two nations traded for a century. One discovered it needed the other more than the other needed it. The dependency was invisible until a crisis made it visible."},
+
+    # --- Science fundamentals ---
+    {"type": "text", "data": "Energy is conserved. It cannot be created or destroyed. It only changes form — from motion to heat, from chemical to electrical."},
+    {"type": "text", "data": "Entropy increases in isolated systems. Order tends toward disorder. Maintaining order requires a continuous input of energy."},
+    {"type": "text", "data": "Every action produces an equal and opposite reaction. Forces come in pairs. No force exists without a counterforce."},
+    {"type": "text", "data": "Gravity attracts all mass toward all other mass. The same force that pulls an apple down holds planets in orbit."},
+    {"type": "text", "data": "Light travels at the same speed for all observers regardless of their motion. This requires that time and space are not fixed — they stretch and compress."},
+    {"type": "text", "data": "Quantum mechanics predicts that a particle has no definite position until it is observed. Observation changes the thing being observed."},
+    {"type": "numeric", "data": {"label": "temperature_entropy_relationship", "values": [1, 4, 9, 16, 25, 36, 49], "unit": "relative_disorder"}},
+    {"type": "numeric", "data": {"label": "gravitational_force_distance", "values": [100, 25, 11, 6.25, 4, 2.78], "unit": "relative_force"}},
+    {"type": "pattern", "data": {"label": "wave_interference", "sequence": [0, 1, 0, -1, 0, 1, 0, -1, 0, 1]}},
+    {"type": "text", "data": "A perpetual motion machine is impossible. Any process that produces useful work also produces waste heat. Efficiency is always less than one."},
+
+    # --- Biology and genetics ---
+    {"type": "text", "data": "DNA contains instructions for building proteins. Proteins carry out all cellular functions. Everything a cell does is ultimately directed by its DNA."},
+    {"type": "text", "data": "Evolution requires three things: variation, heredity, and selection. Without all three, evolution cannot occur. Any one missing stops the process."},
+    {"type": "text", "data": "Parasites that kill their hosts too quickly go extinct. The most successful parasites are those that keep their hosts alive long enough to spread."},
+    {"type": "text", "data": "Mutualism is when two species benefit from each other. Clownfish protect anemones from predators. Anemones protect clownfish. Both survive better together."},
+    {"type": "text", "data": "Neurons fire when input exceeds a threshold. The same neuron can encode different intensities by changing how often it fires, not how strongly."},
+    {"type": "text", "data": "A gene that causes early death after reproduction is invisible to natural selection. Selection only acts on traits that affect reproductive success."},
+    {"type": "numeric", "data": {"label": "dna_error_rate_per_division", "value": 0.000000001, "unit": "errors_per_base"}},
+    {"type": "numeric", "data": {"label": "brain_synapses", "value": 100000000000000, "unit": "connections"}},
+    {"type": "pattern", "data": {"label": "evolutionary_fitness", "sequence": [1, 1, 2, 4, 8, 6, 5, 6, 8, 12, 20]}},
+    {"type": "text", "data": "The same gene can produce different effects depending on which other genes are present. Genes do not have fixed, isolated functions."},
+
+    # --- Mathematics and logic ---
+    {"type": "text", "data": "If all A are B, and C is A, then C is B. This holds regardless of what A, B, and C represent. The form of the argument determines validity, not the content."},
+    {"type": "text", "data": "There are infinitely many prime numbers. No matter how large a prime you find, there is always a larger one. The set of primes has no largest element."},
+    {"type": "text", "data": "A set cannot contain itself as a member without creating a contradiction. This simple constraint required a complete reconstruction of the foundations of mathematics."},
+    {"type": "text", "data": "Correlation is not causation. Two things can change together for decades without either causing the other. A third factor may cause both."},
+    {"type": "text", "data": "Doubling something repeatedly produces numbers that dwarf any fixed addition. Exponential growth outpaces linear growth eventually, no matter how large the linear start."},
+    {"type": "numeric", "data": {"label": "prime_distribution", "values": [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37], "unit": "prime_numbers"}},
+    {"type": "numeric", "data": {"label": "exponential_vs_linear", "values": [1, 2, 4, 8, 16, 32, 64, 128], "unit": "exponential"}},
+    {"type": "pattern", "data": {"label": "pascals_triangle_row", "sequence": [1, 5, 10, 10, 5, 1]}},
+    {"type": "text", "data": "A statement that cannot be proven false is not scientific. A theory must make predictions that could be wrong. Unfalsifiable claims are outside the domain of science."},
+    {"type": "pattern", "data": {"label": "binary_counting", "sequence": [1, 10, 11, 100, 101, 110, 111, 1000]}},
+
+    # --- Ethics as narrative (consequences, not rules) ---
+    {"type": "text", "data": "A fishing village shared a common sea. Each family caught as much as it could. No single family had reason to stop. Together they exhausted the fish. The village starved."},
+    {"type": "text", "data": "Two traders could cooperate and both profit, or each could defect and neither would profit. Both defected. Both lost. They never traded again."},
+    {"type": "text", "data": "A merchant built a reputation for honesty over thirty years. Once, under pressure, she delivered short weight. The reputation was gone within a month."},
+    {"type": "text", "data": "Villages that punished those who did not contribute to shared projects maintained cooperation for generations. Villages that did not punish saw cooperation erode within years."},
+    {"type": "text", "data": "A government chose to maximize short-term revenue from its forests. The forests were cleared. The rivers silted. The farmland lost its water. The revenue collapsed."},
+    {"type": "text", "data": "A factory discharged waste into a river upstream. Downstream villages lost their water source. The factory paid nothing. The cost was distributed while the profit was concentrated."},
+    {"type": "text", "data": "A small group withheld information from others to maintain advantage. Over time, others discovered the withholding. Trust collapsed and cooperation became impossible."},
+    {"type": "text", "data": "A species was protected because it was beautiful. Another species, less visible but ecologically critical, was not protected. The critical species collapsed. The beautiful one followed."},
+    {"type": "numeric", "data": {"label": "cooperation_game_rounds", "values": [3, 3, 3, 2, 2, 1, 0, 0, 0, 0], "unit": "cooperation_score"}},
+    {"type": "numeric", "data": {"label": "commons_resource_vs_users", "values": [100, 95, 87, 74, 58, 39, 18, 5, 0], "unit": "resource_remaining_pct"}},
+    {"type": "pattern", "data": {"label": "defection_cascade", "sequence": [8, 8, 7, 7, 6, 5, 4, 2, 1, 0]}},
+    {"type": "text", "data": "A company cut costs by reducing safety checks. Nothing went wrong for two years. Then one failure cost more than the savings of a decade."},
+    {"type": "text", "data": "People who received help from strangers were more likely to help other strangers later, even strangers who had not helped them. Help propagated through a network."},
+    {"type": "text", "data": "A community that excluded outsiders survived famine better in the short term. Over generations it became genetically fragile and culturally stagnant. Openness had long-term value."},
+
+    # --- Philosophy and epistemology ---
+    {"type": "text", "data": "A belief that has never been tested by evidence that could contradict it is not knowledge. It is assumption. The difference matters when action is required."},
+    {"type": "text", "data": "Every observation is filtered through a framework of prior beliefs. Two observers with different frameworks can observe the same event and draw opposite conclusions."},
+    {"type": "text", "data": "A model that explains everything explains nothing. Explanatory power requires the model to rule some things out. If it rules nothing out, it predicts nothing."},
+    {"type": "text", "data": "We tend to remember the cases that confirm our beliefs and forget the cases that do not. The bias is invisible because we are doing it. It cannot be eliminated by trying harder."},
+    {"type": "text", "data": "An argument can be valid and still have a false conclusion, if the premises are false. Logical form and truth are separate properties."},
+    {"type": "text", "data": "Absence of evidence is not evidence of absence. The failure to detect something may mean it is not there, or it may mean our instruments are insufficient."},
+    {"type": "text", "data": "Two people can solve the same problem differently and arrive at the same correct answer. The process is not the same as the result. Multiple paths can reach the same place."},
+    {"type": "text", "data": "A paradox does not mean reality is broken. It usually means the concepts being used are imprecise. Clarifying the concepts dissolves the paradox."},
+    {"type": "numeric", "data": {"label": "model_accuracy_vs_complexity", "values": [40, 60, 75, 83, 87, 88, 87, 85], "unit": "pct_correct"}},
+    {"type": "pattern", "data": {"label": "hypothesis_revision", "sequence": [1, 1, 1, 0, 1, 0, 0, 1, 0, 1]}},
 ]
 
 

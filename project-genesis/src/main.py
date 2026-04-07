@@ -16,6 +16,7 @@ Usage:
     python src/main.py --open-only       # Skip curriculum, go straight to OPEN
     python src/main.py --resume          # Resume from last checkpoint
     python src/main.py --snapshot label  # Save a named snapshot at end
+    python src/main.py --no-adaptive     # Use plain random shuffle instead of AdaptiveStream
 """
 
 import sys
@@ -27,6 +28,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from orchestrator.orchestrator import Orchestrator
 from curriculum.open_stage import DataStream, advance_to_open
+from curriculum.adaptive_stream import AdaptiveStream
 from utils.types import Stage
 
 
@@ -111,16 +113,28 @@ def run_curriculum_pipeline(brain, verbose: bool = True) -> bool:
     return reached_open
 
 
-def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True):
+def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
+                   adaptive: bool = True):
     """
     Feed Genesis uncurated open-stage data and watch what develops.
-    """
-    stream = DataStream(shuffle=True)
 
-    _header(f"OPEN STAGE — {n_cycles} cycles · {stream.pool_size} item pool")
+    adaptive=True uses AdaptiveStream (attention-weighted selection).
+    adaptive=False falls back to plain shuffled DataStream.
+    """
+    if adaptive:
+        stream = AdaptiveStream(brain)
+        stream_label = "adaptive (attention-weighted)"
+    else:
+        stream = DataStream(shuffle=True)
+        stream_label = "random shuffle"
+
+    pool_size = stream._pool_size if hasattr(stream, "_pool_size") else len(stream._pool)
+
+    _header(f"OPEN STAGE — {n_cycles} cycles · {pool_size} item pool · {stream_label}")
     print(f"  No curriculum. No correct answers. No advancement criteria.")
     print(f"  Processor integration active. Observer watching.")
-    print(f"  Pool: {stream.stats()['pool_composition']}")
+    if not adaptive:
+        print(f"  Pool: {stream.stats()['pool_composition']}")
     print()
 
     # Expression snapshots every N cycles
@@ -151,9 +165,14 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True):
             # Live stats
             mem_now = brain.memory.stats()["total_stored"]
             elapsed = time.time() - t_start
+            adaptive_info = ""
+            if adaptive and hasattr(stream, "stats"):
+                astats = stream.stats()
+                adaptive_info = (f"| attn-sel: {astats['attention_pct']:.0f}% "
+                                 f"| attn-terms: {astats['active_attention_terms']} ")
             print(f"  [{i+1}/{n_cycles}] memories: {mem_now} "
                   f"| cross-modal events: {cross_modal_total} "
-                  f"| {elapsed:.1f}s elapsed")
+                  f"{adaptive_info}| {elapsed:.1f}s elapsed")
             print()
 
     # Final state
@@ -173,6 +192,10 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True):
     print(f"  Working memory:      {wm_final.get('occupied', '?')}/"
           f"{wm_final.get('capacity', '?')}")
     print(f"  Observer state:      {brain.interaction.observer_state().value.upper()}")
+    if adaptive and hasattr(stream, "stats"):
+        astats = stream.stats()
+        print(f"  Attention-sel pct:   {astats['attention_pct']:.1f}%")
+        print(f"  Active attn terms:   {astats['active_attention_terms']}")
     print()
 
     _show_expression(brain, "Final state")
@@ -324,6 +347,7 @@ def main():
     interactive = False
     open_only = False
     resume = False
+    adaptive = True
     snapshot_label = None
 
     args = sys.argv[1:]
@@ -338,6 +362,8 @@ def main():
             open_only = True
         elif arg == "--resume":
             resume = True
+        elif arg == "--no-adaptive":
+            adaptive = False
         elif arg.startswith("--cycles="):
             try:
                 cycles = int(arg.split("=")[1])
@@ -365,7 +391,7 @@ def main():
         brain.curriculum.current_stage = Stage.OPEN
         print("  Skipping curriculum — starting at OPEN stage.")
 
-    run_open_stage(brain, n_cycles=cycles, verbose=verbose)
+    run_open_stage(brain, n_cycles=cycles, verbose=verbose, adaptive=adaptive)
 
     # Optional named snapshot of the current attention state
     if snapshot_label:
