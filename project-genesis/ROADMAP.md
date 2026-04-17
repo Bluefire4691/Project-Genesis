@@ -2,14 +2,22 @@
 
 ## Vision
 
-Intelligence is not programmed — it emerges from survival pressure, experience, and
-the formation of relationships between things encountered in the world. Project Genesis
-builds AI from the bottom up: starting with a system that merely persists, layering
-perception, memory, and meaning, and watching what develops.
+Genesis is an attempt to build a system that can plausibly be said to **be, and think,
+and make decisions for itself** — an entity, not a tool.
 
-The thesis: given survival pressure, total-retention memory, rich sensory processing,
-and a community environment (rather than isolation), complex cognition can emerge
-without being explicitly designed in.
+The three properties that define an entity rather than a capability:
+1. **Continuity** — persistent memory across time, not context-window reconstruction
+2. **Self-authored consolidation** — what matters decided by the system's own signals
+3. **Accumulated individuality** — a perspective specific to this instance, built from
+   processing history alone
+
+Genesis does not compete on benchmarks. Capability is not the goal. (See
+`docs/architecture_amendment_v0.2.md` for the full statement and the Bitter Lesson
+response.)
+
+The architecture is **evolutionary layering** (Brooks 1986 subsumption): each milestone
+is permanent. M9 is M1+M2+...+M9, never M9 *instead of* M1. Higher layers suppress
+the substrate; they never replace it.
 
 ---
 
@@ -75,54 +83,23 @@ Genesis now knows *how* things relate, not just *that* they co-occur.
 
 ## Active Development
 
-### M8: Education Data Expansion ✅ (current)
-Expand the DataStream pool with structured knowledge domains. The system has the
-machinery to extract meaning — now give it richer material.
+### M8: Education Data Expansion ✅
+Pool expanded 56 → 119 items across 14 domains. Six new domains added: history and
+causation, science fundamentals, biology and genetics, mathematics and logic, ethics as
+narrative (consequences-based, not rules), philosophy and epistemology. Ethics items
+express experienced events and their cascading consequences — "this happened, then this
+happened" — never moral declarations. 30 tests in `tests/test_education_data.py`.
 
-New domains:
-- **History and causation**: events as causal chains, societal cause-effect
-- **Science fundamentals**: energy, entropy, conservation, emergence
-- **Biology and genetics**: DNA, evolution, neural systems
-- **Mathematics and logic**: proof structure, logical implication, set relations
-- **Ethics as narrative**: consequences of choices, cooperation/defection dynamics,
-  the tragedy of the commons — experienced, not declared
-- **Philosophy and epistemology**: what knowledge is, how models fail, map vs. territory
-- **Contradictions**: genuine conflicts in the evidence pool (world doesn't resolve them)
-
-Pool grows from 56 → ~130 items. Domain tags added to DataStream items.
-
-### M9: Adaptive Stream — Feedback Loop 🔲
-**Status:** Next
-
-Close the feedback loop between Genesis's attention and what it encounters next.
-
-Currently: input flows in → memory/relations accumulate → expression surfaces state.
-Nothing flows back. Genesis processes whatever the DataStream provides, regardless
-of what it's attending to.
-
-After M9: Genesis's attention vector (top concepts in working memory) biases what
-the AdaptiveStream selects next. If Genesis is deeply engaged with ecological causation,
-it's more likely to encounter more ecological content — not because we decided that,
-but because attention shapes perception. This is how biological cognition works.
-
-This is the minimal feedback loop. It does not give Genesis agency over its inputs.
-It makes its current mental state an influence on its environment, just as attention
-does in biological systems.
-
-**Why this matters for ethics**: consequences require a feedback loop to be real.
-"You did X, and then Y happened" only means something if Genesis can form that chain
-from its own outputs. M9 makes that chain possible.
-
-Deliverables:
-- `src/curriculum/adaptive_stream.py` — AdaptiveStream wrapping DataStream
-- Attention-weighted item selection (context overlap scoring)
-- Diversity floor (minimum % of non-attention-weighted items, prevents monoculture)
-- Expression-driven selection hook in Orchestrator
-- Updated main.py to use AdaptiveStream
+### M9: Adaptive Stream — Feedback Loop ✅
+`AdaptiveStream` in `src/curriculum/adaptive_stream.py` closes the minimal feedback loop:
+Genesis's attention (top working memory terms) biases what it encounters next. Items
+scored by word overlap with attention window. 30% diversity floor prevents monoculture.
+Base probability floor ensures no item permanently excluded. `--no-adaptive` flag falls
+back to plain DataStream. 48 tests in `tests/test_adaptive_stream.py`.
 
 ---
 
-## Planned Milestones
+## Active Development
 
 ### M10: Inference Engine 🔲
 Reason from stored relations, not just recall them.
@@ -132,11 +109,19 @@ If Genesis has stored:
 - `deer CAUSES overgrazing`
 - `overgrazing CAUSES erosion`
 
-It should be able to assert `wolves CONTROLS erosion` (transitively) with
-compound confidence. This is deductive closure over the RelationGraph.
+It should be able to assert `wolves CONTROLS erosion` (transitively) with compound
+confidence. This is deductive closure over the RelationGraph.
 
-Also: inductive patterns — if 5 independent sources associate `predator_removal`
-with `prey_explosion`, Genesis should surface this as a general principle.
+Also: inductive patterns — if 5 independent sources associate `predator_removal` with
+`prey_explosion`, Genesis should surface this as a general principle.
+
+**Additions from architecture amendment (v0.2):**
+- **wm_delta salience signal**: track working-memory delta per input cycle (items
+  added/modified/evicted). Use magnitude as archive significance signal — first step
+  toward self-authored consolidation that isn't fully engineer-specified.
+- **OOD detection**: if a new input has zero overlap with current attention terms and no
+  path in the relation graph, flag it as "novel/ungrounded." First step toward the
+  metacognitive module described in amendment Section 4.
 
 Deliverables:
 - `src/cognition/inference.py` — InferenceEngine
@@ -145,6 +130,8 @@ Deliverables:
 - Inductive pattern detection: repeated triples across independent sources
 - Inferred relations stored separately from observed (different confidence tier)
 - `brain.infer(concept)` — what can be derived from what's known about X
+- wm_delta tracking in memory cycle, feeding archive significance
+- OOD signal in Orchestrator, surfaced in expression snapshots
 
 ### M11: Contradiction Detection 🔲
 The world presents conflicting evidence. Intelligence handles contradiction.
@@ -207,6 +194,35 @@ After sufficient runtime, the archive contains behavioral data. Use it:
 - What does danger look like when it actually occurs?
 - Calibrate COMMITMENT_CYCLES, diversity thresholds, energy collapse definitions
   from observed behavioral patterns
+
+---
+
+## Architecture Amendment Decisions (v0.2, April 2026)
+
+Decisions recorded from `docs/architecture_amendment_v0.2.md`:
+
+**Accepted:**
+- Section 0: goal reframed as *entity* (continuity + self-authored consolidation +
+  accumulated individuality), not capability. This is now the primary framing in
+  CLAUDE.md and this document.
+- Section 6: "never crash" reframed as evolutionary layering / permanent reflexive
+  substrate. M1 interface spec written (`docs/m1_interface_spec.md`).
+- Section 4 (partial): metacognition — OOD detection added to M10 scope.
+- Section 5 (partial): consolidation gap acknowledged — wm_delta salience signal
+  added to M10 scope as first step toward self-authored prioritization.
+- Section 7: Bitter Lesson confronted explicitly. Acknowledged in advance.
+
+**Deferred:**
+- Section 1: Predictive processing as architectural foundation — retained as theoretical
+  orientation. Evaluate when M10 (inference engine) is built. Commit to mechanism
+  when there's a specific mechanism to commit to.
+- Section 2: Active inference hypervisor — current bandit-style routing is the pragmatic
+  path described. Revisit when module ecosystem matures (M12+ era).
+
+**Declined:**
+- Section 3: 2D embodiment layer — declined at this stage. Transfer problem unsolved.
+  Genesis's domain is conceptual/linguistic; grounding in a 2D grid doesn't transfer.
+  Revisit if evidence of ungrounded physical reasoning emerges. Question stays open.
 
 ---
 
