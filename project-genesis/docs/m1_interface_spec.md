@@ -42,9 +42,11 @@ contract cannot be changed without a version bump and explicit review of all dep
    ```
 3. `tick` count is strictly increasing across the lifetime of the SurvivalOS instance.
 4. `energy` decreases under real resource load and recovers when load drops.
-5. `throttle` only increases by at most one level per tick (hysteresis: requires 2
-   consecutive ticks at a new pressure level before transitioning). It can drop
-   multiple levels at once on recovery.
+5. `throttle` transitions require 2 consecutive ticks at the target level before
+   committing. A single-tick spike does not change the throttle level. The system
+   may jump multiple levels in either direction after the 2-tick confirmation window
+   — extreme resource collapse reaches EMERGENCY directly, not by stepping through
+   intermediate levels.
 
 **Higher layers must not:**
 - Skip calling `tick()` to avoid overhead. The survival cycle must run every cognitive

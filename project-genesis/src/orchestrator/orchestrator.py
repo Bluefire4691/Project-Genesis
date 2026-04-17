@@ -230,20 +230,14 @@ class Orchestrator:
         """
         Return all processors available at current throttle level.
 
-        The primary (input_type) is always included if text is available.
-        Under heavy throttle, only text survives — that's the correct
-        degradation: lose breadth before losing function.
+        M1 guarantees can("text") is always True. Under heavy throttle,
+        text survives last — lose breadth before losing function.
         """
-        active = {}
-        for name, processor in self.processors.items():
-            if self.survival.can(name):
-                active[name] = processor
-
-        if not active:
-            # Ultimate fallback — text always available unless something is broken
-            active["text"] = self.processors["text"]
-
-        return active
+        return {
+            name: processor
+            for name, processor in self.processors.items()
+            if self.survival.can(name)
+        }
 
     def _store_synthesis(self, synthesis, raw_data: Any) -> list[str]:
         """
