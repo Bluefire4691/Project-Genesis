@@ -229,6 +229,9 @@ def run_interactive(brain):
     print("    inferences           — top inferences across all concepts")
     print("    path:<A>:<B>         — relation chain from A to B")
     print("    causal               — show all causal chains")
+    print("    ethics               — ethics patterns Genesis has formed")
+    print("    conflicts            — show known contradictions")
+    print("    conflicts:<concept>  — contradictions involving a concept")
     print("    archive              — list archive stats + snapshots")
     print("    archive:<domain>     — query archive by domain tag")
     print("    snapshot:<label>     — save named attention snapshot")
@@ -309,6 +312,48 @@ def run_interactive(brain):
                         print(f"  Path {i}: {chain}")
             else:
                 print("  Usage: path:<concept_A>:<concept_B>")
+        elif user_input.lower() == "ethics":
+            report = brain.ethics.scan()
+            print(f"\n  {brain.ethics.summary()}")
+            cov = report["concept_coverage"]
+            print(f"\n  Concept coverage: {cov['covered_count']}/{cov['total_concepts']} "
+                  f"({cov['coverage_pct']}%)")
+            if report["emergent_patterns"]:
+                print(f"\n  Emergent patterns ({len(report['emergent_patterns'])}):")
+                for p in report["emergent_patterns"][:5]:
+                    print(f"    [{p['confidence']:.2f}] {p['chain']}")
+            if report["observed_relations"]:
+                print(f"\n  Observed ethics relations ({len(report['observed_relations'])}):")
+                for r in report["observed_relations"][:8]:
+                    print(f"    [{r['confidence']:.2f}] {r['subject']} "
+                          f"—[{r['relation']}]→ {r['object']}")
+            if report["inferred_chains"]:
+                print(f"\n  Inferred ethics chains ({len(report['inferred_chains'])}):")
+                for r in report["inferred_chains"][:5]:
+                    print(f"    [{r['confidence']:.2f}] {r['subject']} "
+                          f"—[{r['relation']}]→ {r['object']} "
+                          f"(chain={r['chain_length']})")
+        elif user_input.lower() == "conflicts":
+            conflicts = brain.contradictions.query(limit=15)
+            if not conflicts:
+                print("  No contradictions recorded yet.")
+            else:
+                print(f"  {len(conflicts)} conflict(s):")
+                for c in conflicts:
+                    print(f"    {c['subject']} —[{c['rel_type_a']}]→ {c['object']}  "
+                          f"[{c['conf_a']:.2f}]")
+                    print(f"    {c['subject']} —[{c['rel_type_b']}]→ {c['object']}  "
+                          f"[{c['conf_b']:.2f}]  ← CONFLICT")
+        elif user_input.lower().startswith("conflicts:"):
+            concept = user_input.split(":", 1)[1].strip()
+            conflicts = brain.contradictions.query_concept(concept)
+            if not conflicts:
+                print(f"  No contradictions involving '{concept}'.")
+            else:
+                print(f"  {len(conflicts)} conflict(s) for '{concept}':")
+                for c in conflicts:
+                    print(f"    {c['subject']} —[{c['rel_type_a']}]→ {c['object']}  "
+                          f"vs  —[{c['rel_type_b']}]→  [{c['conf_a']:.2f} / {c['conf_b']:.2f}]")
         elif user_input.lower() == "causal":
             chains = brain.relations.causal_chains(min_confidence=0.7)
             if not chains:

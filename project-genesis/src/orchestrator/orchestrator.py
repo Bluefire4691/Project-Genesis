@@ -36,6 +36,8 @@ from survival import SurvivalOS
 from interface import InteractionLayer
 from orchestrator.integration import IntegrationLayer
 from cognition.inference import InferenceEngine
+from cognition.contradictions import ContradictionLog
+from cognition.ethics import EthicsLens
 
 
 class Orchestrator:
@@ -85,11 +87,13 @@ class Orchestrator:
         # Unique session identifier — used by ArchiveStore for provenance
         self.session_id = str(uuid.uuid4())[:8]
 
-        # Archive, relation graph, session manager, and inference engine share the DB
+        # All subsystems share the memory DB connection
         _conn = self.memory._long_term.conn
         self.archive = ArchiveStore(_conn)
         self.relations = RelationGraph(_conn)
         self.inference = InferenceEngine(self.relations)
+        self.contradictions = ContradictionLog(_conn)
+        self.ethics = EthicsLens(self)
         self._session_manager = SessionManager(_conn)
 
         self.survival: SurvivalOS = survival if survival is not None else SurvivalOS()
@@ -358,18 +362,26 @@ class Orchestrator:
             )
 
         # Relation extraction — store typed triples from text outputs
+        relations_added = 0
         for output in [primary] + synthesis.secondary_outputs:
             if output.source != "text":
                 continue
             for rel in output.extracted.get("relations", []):
-                self.relations.add(
+                if self.relations.add(
                     subject=rel["subject"],
                     rel_type=rel["relation"],
                     obj=rel["object"],
                     confidence=rel["confidence"],
                     source_key=output.suggested_key,
                     session_id=self.session_id,
-                )
+                ):
+                    relations_added += 1
+
+        # Contradiction scan after any new relations are added
+        if relations_added > 0:
+            new_conflicts = self.contradictions.scan(session_id=self.session_id)
+            if new_conflicts > 0 and self.survival.can("logging"):
+                self._log(f"  ⚡ {new_conflicts} new contradiction(s) detected")
 
         return stored_keys
 
@@ -476,6 +488,7 @@ class Orchestrator:
             "archive": self.archive.stats(),
             "relations": self.relations.stats(),
             "inference": self.inference.stats(),
+            "contradictions": self.contradictions.stats(),
             "processors": list(self.processors.keys()),
         }
         status.update(self.survival.report())
