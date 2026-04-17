@@ -1,0 +1,321 @@
+"""
+Inference Engine — M10.
+
+Reasons from stored relations rather than just recalling them.
+
+If Genesis has observed:
+    wolves   CONTROLS  deer
+    deer     CAUSES    overgrazing
+    overgrazing CAUSES erosion
+
+The InferenceEngine asserts:
+    wolves CONTROLS erosion  (2-hop CONTROLS chain)
+    deer   CAUSES   erosion  (1-hop already observed, but also transitively found)
+
+Transitivity rules — same relation type propagates:
+    A CAUSES B,   B CAUSES C   → A CAUSES C
+    A CONTROLS B, B CONTROLS C → A CONTROLS C
+    A REQUIRES B, B REQUIRES C → A REQUIRES C
+    A ENABLES B,  B ENABLES C  → A ENABLES C
+    A IS_A B,     B IS_A C     → A IS_A C
+
+Compound confidence per chain:
+    conf = Π(hop_confidences) × HOP_DECAY^(chain_length − 1)
+
+Inferred relations are stored in a separate table from observed relations.
+They never overwrite observed data.
+"""
+
+import json
+import re
+import time
+from typing import Optional
+
+from memory.relations import RelationGraph
+
+
+# Relation types that propagate transitively (same type)
+_TRANSITIVE = frozenset({"CAUSES", "CONTROLS", "REQUIRES", "ENABLES", "IS_A"})
+
+# Confidence multiplier per additional hop beyond the first
+_HOP_DECAY: float = 0.85
+
+# Minimum inferred confidence worth storing
+_MIN_CONFIDENCE: float = 0.20
+
+# Maximum chain length to explore (prevents combinatorial explosion)
+_MAX_CHAIN: int = 4
+
+# Minimum observed confidence to treat a relation as a valid chain edge
+_MIN_EDGE_CONF: float = 0.30
+
+
+def _norm(text: str) -> str:
+    """Normalise concept string: lowercase, strip punctuation, collapse whitespace."""
+    cleaned = re.sub(r"[^a-z0-9 ]", "", text.lower().strip())
+    return " ".join(cleaned.split())
+
+
+class InferenceEngine:
+    """
+    Transitive closure engine over the RelationGraph.
+
+    Shares the sqlite3.Connection from RelationGraph — no extra file,
+    no multi-connection contention.
+
+    Usage:
+        engine = InferenceEngine(brain.relations)
+        n = engine.run(session_id=brain.session_id)   # infer over all concepts
+        result = engine.infer("wolves")               # infer around one concept
+        result = engine.query("wolves")               # query stored inferences
+    """
+
+    def __init__(self, relations: RelationGraph):
+        self._relations = relations
+        self._conn = relations._conn
+        self._init_schema()
+
+    # ------------------------------------------------------------------
+    # Schema
+    # ------------------------------------------------------------------
+
+    def _init_schema(self) -> None:
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS relation_inferences (
+                inf_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject      TEXT NOT NULL,
+                rel_type     TEXT NOT NULL,
+                object       TEXT NOT NULL,
+                confidence   REAL NOT NULL,
+                chain_len    INTEGER NOT NULL,
+                chain_json   TEXT NOT NULL,
+                inferred_at  REAL NOT NULL,
+                session_id   TEXT,
+                UNIQUE(subject, rel_type, object)
+            )
+        """)
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_inf_subj ON relation_inferences(subject)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_inf_obj ON relation_inferences(object)"
+        )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Run
+    # ------------------------------------------------------------------
+
+    def run(self, session_id: str = "") -> int:
+        """
+        Run transitive inference over all known concepts.
+
+        Returns the number of new inferences added this call.
+        """
+        cur = self._conn.execute(
+            "SELECT DISTINCT subject AS c FROM relations "
+            "UNION SELECT DISTINCT object AS c FROM relations"
+        )
+        concepts = [row[0] for row in cur.fetchall()]
+
+        before = self._count()
+        for concept in concepts:
+            self._infer_from(concept, session_id)
+        return self._count() - before
+
+    def infer(self, concept: str, session_id: str = "") -> dict:
+        """
+        Run inference focused on one concept, then return all inferences for it.
+        """
+        normed = _norm(concept)
+        if normed:
+            self._infer_from(normed, session_id)
+        return self.query(normed)
+
+    # ------------------------------------------------------------------
+    # Core BFS
+    # ------------------------------------------------------------------
+
+    def _infer_from(self, start: str, session_id: str) -> None:
+        """
+        BFS outward from `start`, building transitive chains.
+
+        Only same-type relation chains propagate: CAUSES→CAUSES,
+        CONTROLS→CONTROLS, etc.
+        """
+        # Queue: (current_concept, steps_list, running_product_of_hop_confs)
+        # steps_list: list of (from, rel_type, to, hop_conf)
+        queue: list[tuple] = [(start, [], 1.0)]
+        # Track (start, endpoint, rel_type) tuples we've already stored
+        stored_pairs: set[tuple] = set()
+
+        while queue:
+            current, steps, path_prod = queue.pop(0)
+            if len(steps) >= _MAX_CHAIN:
+                continue
+
+            for rel_type, obj, hop_conf in self._outgoing(current):
+                # Cycle check: don't revisit start or any concept in current path
+                path_concepts = {s[2] for s in steps} | {start}
+                if obj in path_concepts:
+                    continue
+
+                new_steps = steps + [(current, rel_type, obj, hop_conf)]
+                new_prod = path_prod * hop_conf
+
+                # Only store inferences that are non-trivial (≥2 hops)
+                if len(new_steps) >= 2:
+                    first_rel = new_steps[0][1]  # rel_type at start of chain
+                    # Only propagate if all steps share the same rel_type
+                    if rel_type == first_rel:
+                        pair = (start, obj, first_rel)
+                        if pair not in stored_pairs:
+                            stored_pairs.add(pair)
+                            decay = _HOP_DECAY ** (len(new_steps) - 1)
+                            inferred_conf = new_prod * decay
+                            if inferred_conf >= _MIN_CONFIDENCE:
+                                self._store(
+                                    start, first_rel, obj,
+                                    inferred_conf, new_steps, session_id,
+                                )
+
+                queue.append((obj, new_steps, new_prod))
+
+    def _outgoing(self, concept: str) -> list[tuple]:
+        """Return (rel_type, object, confidence) for transitive edges from concept."""
+        placeholders = ",".join("?" * len(_TRANSITIVE))
+        rows = self._conn.execute(
+            f"SELECT rel_type, object, confidence FROM relations "
+            f"WHERE subject = ? AND confidence >= ? AND rel_type IN ({placeholders}) "
+            f"ORDER BY confidence DESC LIMIT 20",
+            (concept, _MIN_EDGE_CONF, *_TRANSITIVE),
+        ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Storage
+    # ------------------------------------------------------------------
+
+    def _store(
+        self,
+        subject: str,
+        rel_type: str,
+        obj: str,
+        confidence: float,
+        steps: list,
+        session_id: str,
+    ) -> None:
+        chain = [
+            {"from": s[0], "via": s[1], "to": s[2], "conf": round(s[3], 4)}
+            for s in steps
+        ]
+        try:
+            self._conn.execute("""
+                INSERT INTO relation_inferences
+                    (subject, rel_type, object, confidence, chain_len, chain_json,
+                     inferred_at, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(subject, rel_type, object) DO UPDATE SET
+                    confidence  = MAX(confidence, excluded.confidence),
+                    chain_len   = CASE
+                                    WHEN excluded.confidence > confidence
+                                    THEN excluded.chain_len ELSE chain_len
+                                  END,
+                    chain_json  = CASE
+                                    WHEN excluded.confidence > confidence
+                                    THEN excluded.chain_json ELSE chain_json
+                                  END,
+                    inferred_at = excluded.inferred_at
+            """, (
+                subject, rel_type, obj,
+                round(confidence, 4),
+                len(steps),
+                json.dumps(chain),
+                time.time(),
+                session_id,
+            ))
+            self._conn.commit()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Query
+    # ------------------------------------------------------------------
+
+    def query(self, concept: str, min_confidence: float = _MIN_CONFIDENCE) -> dict:
+        """
+        Return all inferences involving `concept`.
+
+        Returns {concept, as_subject: [...], as_object: [...]}
+        Each entry: {subject, relation, object, confidence, chain_length, chain}
+        """
+        normed = _norm(concept)
+        rows = self._conn.execute("""
+            SELECT subject, rel_type, object, confidence, chain_len, chain_json
+            FROM relation_inferences
+            WHERE (subject = ? OR object = ?) AND confidence >= ?
+            ORDER BY confidence DESC
+        """, (normed, normed, min_confidence)).fetchall()
+
+        as_subject, as_object = [], []
+        for row in rows:
+            entry = {
+                "subject":      row[0],
+                "relation":     row[1],
+                "object":       row[2],
+                "confidence":   row[3],
+                "chain_length": row[4],
+                "chain":        json.loads(row[5]),
+            }
+            (as_subject if row[0] == normed else as_object).append(entry)
+
+        return {"concept": normed, "as_subject": as_subject, "as_object": as_object}
+
+    def top_inferences(self, limit: int = 20, min_confidence: float = _MIN_CONFIDENCE) -> list[dict]:
+        """Highest-confidence inferences across all concepts."""
+        rows = self._conn.execute("""
+            SELECT subject, rel_type, object, confidence, chain_len
+            FROM relation_inferences
+            WHERE confidence >= ?
+            ORDER BY confidence DESC
+            LIMIT ?
+        """, (min_confidence, limit)).fetchall()
+        return [
+            {"subject": r[0], "relation": r[1], "object": r[2],
+             "confidence": r[3], "chain_length": r[4]}
+            for r in rows
+        ]
+
+    def chain_for(self, subject: str, rel_type: str, obj: str) -> Optional[list[dict]]:
+        """Return the stored chain for a specific inferred triple, or None."""
+        row = self._conn.execute("""
+            SELECT chain_json FROM relation_inferences
+            WHERE subject = ? AND rel_type = ? AND object = ?
+        """, (_norm(subject), rel_type, _norm(obj))).fetchone()
+        return json.loads(row[0]) if row else None
+
+    # ------------------------------------------------------------------
+    # Stats
+    # ------------------------------------------------------------------
+
+    def stats(self) -> dict:
+        row = self._conn.execute("""
+            SELECT COUNT(*), AVG(confidence), MIN(chain_len), MAX(chain_len)
+            FROM relation_inferences
+        """).fetchone()
+        total, avg_conf, min_chain, max_chain = row
+        by_type_rows = self._conn.execute("""
+            SELECT rel_type, COUNT(*) FROM relation_inferences GROUP BY rel_type
+        """).fetchall()
+        return {
+            "total_inferences": total or 0,
+            "avg_confidence":   round(avg_conf or 0.0, 3),
+            "min_chain_length": min_chain or 0,
+            "max_chain_length": max_chain or 0,
+            "by_type":          {r[0]: r[1] for r in by_type_rows},
+        }
+
+    def _count(self) -> int:
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM relation_inferences"
+        ).fetchone()[0]

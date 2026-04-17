@@ -19,6 +19,7 @@ context determines what registers.
 """
 
 import json
+import re
 import uuid
 from typing import Any
 
@@ -34,6 +35,7 @@ from curriculum.curriculum import CurriculumEngine
 from survival import SurvivalOS
 from interface import InteractionLayer
 from orchestrator.integration import IntegrationLayer
+from cognition.inference import InferenceEngine
 
 
 class Orchestrator:
@@ -83,10 +85,11 @@ class Orchestrator:
         # Unique session identifier — used by ArchiveStore for provenance
         self.session_id = str(uuid.uuid4())[:8]
 
-        # Archive, relation graph, and session manager share the memory DB connection
+        # Archive, relation graph, session manager, and inference engine share the DB
         _conn = self.memory._long_term.conn
         self.archive = ArchiveStore(_conn)
         self.relations = RelationGraph(_conn)
+        self.inference = InferenceEngine(self.relations)
         self._session_manager = SessionManager(_conn)
 
         self.survival: SurvivalOS = survival if survival is not None else SurvivalOS()
@@ -193,11 +196,26 @@ class Orchestrator:
         else:
             eval_score = synthesis.significance
 
+        # OOD detection — check before storing so we use pre-storage state
+        novel = self._is_novel(synthesis)
+
         # Store everything if resources allow
+        wm_before = len(self.memory.memories)
         if self.survival.can("memory_store"):
-            stored_keys = self._store_synthesis(synthesis, data)
+            stored_keys = self._store_synthesis(synthesis, data, novel=novel)
+            wm_delta = len(self.memory.memories) - wm_before
             if self.survival.can("logging"):
-                self._log(f"  💾 Stored {len(stored_keys)} memory key(s)")
+                novel_tag = " [NOVEL]" if novel else ""
+                self._log(f"  💾 Stored {len(stored_keys)} key(s) Δwm={wm_delta:+d}{novel_tag}")
+
+            # wm_delta boosts archive significance for disruptive inputs
+            if wm_delta > 0:
+                for key in stored_keys:
+                    self.archive.tag(
+                        key=key,
+                        significance=min(1.0, synthesis.significance + wm_delta * 0.05),
+                        session_id=self.session_id,
+                    )
 
             # Update attention with cross-modal concepts first, then primary terms
             attention_terms = synthesis.cross_modal_concepts or synthesis.context_terms
@@ -205,6 +223,7 @@ class Orchestrator:
                 self.memory.update_attention(attention_terms)
         else:
             stored_keys = []
+            wm_delta = 0
             if self.survival.can("logging"):
                 self._log("  Memory storage skipped (emergency throttle)")
 
@@ -224,6 +243,8 @@ class Orchestrator:
             "stage": self.curriculum.current_stage.name,
             "cycle": self.cycle_count,
             "throttle": self.survival.resource.throttle_level.name,
+            "novel": novel,
+            "wm_delta": wm_delta,
         }
 
     def _active_processors(self, input_type: str) -> dict:
@@ -239,7 +260,47 @@ class Orchestrator:
             if self.survival.can(name)
         }
 
-    def _store_synthesis(self, synthesis, raw_data: Any) -> list[str]:
+    def _is_novel(self, synthesis) -> bool:
+        """
+        OOD detection: True if this input has no overlap with known concepts.
+
+        Checks primary output context words against working memory keys and
+        relation graph concepts. Zero overlap = novel/ungrounded input.
+        """
+        context_words = set(
+            re.findall(r"\b[a-z]{3,}\b", synthesis.primary_output.context.lower())
+        )
+        if not context_words:
+            return False
+
+        # Check working memory keys
+        wm_keys_text = " ".join(self.memory.memories.keys()).lower()
+        wm_words = set(re.findall(r"\b[a-z]{3,}\b", wm_keys_text))
+        if context_words & wm_words:
+            return False
+
+        # Check relation graph concepts (subjects and objects)
+        try:
+            rel_row = self._relations_conn_concepts()
+            if context_words & rel_row:
+                return False
+        except Exception:
+            pass
+
+        return True
+
+    def _relations_conn_concepts(self) -> set[str]:
+        """Return set of all concept words currently in the relation graph."""
+        cur = self.memory._long_term.conn.execute(
+            "SELECT DISTINCT subject FROM relations "
+            "UNION SELECT DISTINCT object FROM relations"
+        )
+        words: set[str] = set()
+        for (concept,) in cur.fetchall():
+            words.update(re.findall(r"\b[a-z]{3,}\b", concept))
+        return words
+
+    def _store_synthesis(self, synthesis, raw_data: Any, novel: bool = False) -> list[str]:
         """
         Store all processor outputs, linking cross-modal outputs by association.
 
@@ -315,6 +376,15 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Query
     # ------------------------------------------------------------------
+
+    def infer(self, concept: str) -> dict:
+        """
+        Run transitive inference around a concept and return what Genesis can derive.
+
+        Stores new inferences in relation_inferences table. Returns a dict with
+        all inferences involving concept as subject or object.
+        """
+        return self.inference.infer(concept, session_id=self.session_id)
 
     def save_session(self) -> None:
         """Checkpoint current state to the DB for restore on next startup."""
@@ -405,6 +475,7 @@ class Orchestrator:
             "memory": self.memory.stats(),
             "archive": self.archive.stats(),
             "relations": self.relations.stats(),
+            "inference": self.inference.stats(),
             "processors": list(self.processors.keys()),
         }
         status.update(self.survival.report())

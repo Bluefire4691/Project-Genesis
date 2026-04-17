@@ -1065,3 +1065,129 @@ Per the roadmap:
 - Ethics items are heuristically identified in tests (by consequence keywords); a proper
   `domain` tag on pool items would make domain filtering more robust
 - Relation extraction still per-sentence; compound sentences may split relations oddly
+
+---
+
+## Session 9 — April 17, 2026
+
+**Platform:** Claude Code (CLI)
+**Branch:** `claude/extract-genesis-repo-fn5vW`
+
+### What happened
+- Architecture amendment v0.2 received and integrated
+- CLAUDE.md created as persistent session context file
+- M1 interface spec written; M1 spec bug found and fixed
+- M10 (Inference Engine) completed: InferenceEngine, wm_delta, OOD detection
+- Full suite: **486 tests, all passing**
+
+### What was built
+
+**Architecture and documentation (non-code):**
+- `CLAUDE.md` (new): session bootstrap file. States the entity goal, three defining
+  properties, evolutionary layering principle, milestone table, key files, testing
+  conventions. Future sessions start here.
+- `docs/architecture_amendment_v0.2.md` (new): full amendment text from principal with
+  inline review decisions (accepted/declined/deferred) under each section.
+- `docs/m1_interface_spec.md` (new): formal contract for SurvivalOS — what tick(),
+  can(), safe_call(), report() guarantee. Versioned. Rationale: makes "permanent
+  substrate" a real commitment rather than a metaphor.
+- `ROADMAP.md` rewritten: vision around entity properties, M8/M9 marked complete,
+  M10 expanded with amendment additions, amendment decisions table added.
+
+**M1 fixes (from architecture audit):**
+- `docs/m1_interface_spec.md`: corrected wrong hysteresis guarantee. Removed
+  "at most one level per tick" claim — code correctly allows multi-level jumps on
+  extreme resource collapse. Spec was wrong; code was right.
+- `src/orchestrator/orchestrator.py` (`_active_processors`): removed defensive fallback
+  that bypassed `can()` and hardcoded the text processor. Old code said "unless
+  something is broken" — that's defensive programming contradicting the layering
+  commitment. Now trusts M1's guarantee.
+
+**M10 — Inference Engine:**
+
+`src/cognition/inference.py` — InferenceEngine
+- Transitive closure over RelationGraph: same-type propagation for CAUSES, CONTROLS,
+  REQUIRES, ENABLES, IS_A
+- BFS from each concept outward; cycle detection prevents infinite loops
+- Compound confidence: `Π(hop_confs) × HOP_DECAY^(chain_len − 1)` where HOP_DECAY=0.85
+- MIN_CONFIDENCE=0.20 filter; MAX_CHAIN=4 hops maximum
+- Inferences stored in separate `relation_inferences` table — never overwrites observed
+- `run(session_id)` → infer over all concepts, returns new count
+- `infer(concept, session_id)` → focused inference + query for one concept
+- `query(concept, min_confidence)` → {as_subject, as_object} inferences
+- `top_inferences(limit)` → highest-confidence inferences across all concepts
+- `chain_for(subject, rel_type, object)` → stored chain steps or None
+- `stats()` → total, avg_confidence, chain length range, by_type
+
+`src/orchestrator/orchestrator.py` — wm_delta and OOD detection
+- **wm_delta**: before/after working memory size tracked each cycle. If input adds new
+  keys (Δwm > 0), archive significance is boosted by `Δwm × 0.05`. First step toward
+  self-authored salience — significance now partly determined by how much the input
+  changed Genesis's state, not only by engineer-specified source type.
+- **OOD detection**: `_is_novel(synthesis)` checks primary output context words against
+  (a) working memory keys, (b) relation graph concepts. Zero overlap → `novel=True` in
+  result dict. First empty brain always gets `novel=True`.
+- `infer(concept)` public method on Orchestrator → delegates to InferenceEngine
+- `full_status()` now includes `"inference"` key with InferenceEngine stats
+- `_relations_conn_concepts()` helper for OOD detection — queries DB for all known concepts
+
+`src/main.py` — interactive mode
+- `infer:<concept>` command: run inference + show derived chains with readable format
+- `inferences` command: show top 15 inferences across all concepts
+
+`tests/test_inference.py` — 44 new tests
+- Schema: table created, empty stats
+- Transitive chains: 2-hop and 3-hop for all 5 transitive types
+- Compound confidence: formula verification, decay ordering, threshold filtering
+- No cross-type propagation: CAUSES+CONTROLS mix produces no inference
+- Cycle prevention: self-inference, triangular cycle, over-length chain
+- Query interface: as_subject/as_object, empty concept, min_confidence filter
+- top_inferences: ordering, empty-before-run
+- chain_for: returns list with required keys, unknown returns None
+- Stats: keys present, count grows, by_type populated
+- run(): returns count, adds inferences, idempotent, empty graph no crash
+- Orchestrator integration: brain.infer(), full_status, wm_delta, novel flag
+
+### Key design decisions
+
+**Separate inference table:**
+Inferred relations live in `relation_inferences`, not `relations`. This preserves the
+integrity of observed data. "Genesis observed X" and "Genesis derived X" are different
+epistemic states. The architecture amendment's Section 0 (entity framing) requires that
+Genesis's own perspective not overwrite its raw experience.
+
+**Same-type only for M10:**
+Only chains where all hops share the same rel_type produce inferences. CONTROLS→CAUSES
+cross-type propagation (wolves CONTROLS deer, deer CAUSES overgrazing → wolves CONTROLS
+overgrazing) is meaningful but complex. Deferring to M11 where contradiction detection
+will make cross-type propagation safer to implement.
+
+**wm_delta as first salience signal:**
+The architecture amendment identified "self-authored consolidation" as the critical
+unsolved sub-problem. wm_delta is the first engineer-minimal salience signal: it measures
+how much an input changed Genesis's own working memory state. High disruption = high
+significance, not because the engineer declared it, but because the system's state changed.
+The significance boost (Δwm × 0.05) is still engineer-parameterized, but the signal
+itself is endogenous.
+
+**OOD as architectural metacognition:**
+The `novel` flag surfaces in every cycle result. It's the first form of Genesis knowing
+"this is new to me" — the beginning of calibrated uncertainty rather than processing all
+inputs identically regardless of familiarity. M10's OOD detection is word-overlap based
+(simple); M14 will calibrate it from behavioral history.
+
+### Test count progression
+- After M9: 442 tests
+- After M10: **486 tests** (+44)
+  - test_inference.py: 44 new
+
+### Open threads
+- Cross-type inference (wolves CONTROLS deer, deer CAUSES overgrazing → wolves CONTROLS
+  overgrazing) deferred to M11 — will need contradiction-safe propagation rules
+- `infer()` currently only runs when explicitly called or when `brain.infer(concept)` is
+  called; inference is not run automatically every cycle (too expensive). Needs a trigger
+  strategy — perhaps run after N new relations are added, or at session save time.
+- wm_delta boost uses a fixed coefficient (0.05 per new key) — should be empirically
+  calibrated from archive data in M14
+- Pool at 119 items vs 130 target — still 11 items short
+- The `{docs,src` malformed directory — still needs cleanup (tarball artifact)

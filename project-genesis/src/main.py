@@ -225,6 +225,8 @@ def run_interactive(brain):
     print("    express              — show current expression snapshot")
     print("    status               — full system status")
     print("    relations:<concept>  — what Genesis knows about a concept")
+    print("    infer:<concept>      — what Genesis can derive (transitive chains)")
+    print("    inferences           — top inferences across all concepts")
     print("    path:<A>:<B>         — relation chain from A to B")
     print("    causal               — show all causal chains")
     print("    archive              — list archive stats + snapshots")
@@ -256,6 +258,33 @@ def run_interactive(brain):
                 "observer": s.get("interaction_layer", {}).get("observer", {}).get("state"),
                 "energy": s.get("survival_os", {}).get("resource", {}).get("energy"),
             }, indent=2))
+        elif user_input.lower().startswith("infer:"):
+            concept = user_input.split(":", 1)[1].strip()
+            result = brain.infer(concept)
+            total = len(result["as_subject"]) + len(result["as_object"])
+            print(f"  '{concept}' — {total} inference(s):")
+            for r in result["as_subject"][:8]:
+                chain_str = " → ".join(
+                    f"{s['from']} —[{s['via']}]→ {s['to']}" for s in r["chain"]
+                )
+                print(f"    → {r['relation']} → {r['object']}  "
+                      f"[{r['confidence']:.2f}] via: {chain_str}")
+            for r in result["as_object"][:8]:
+                chain_str = " → ".join(
+                    f"{s['from']} —[{s['via']}]→ {s['to']}" for s in r["chain"]
+                )
+                print(f"    ← {r['subject']} —[{r['relation']}]→  "
+                      f"[{r['confidence']:.2f}] via: {chain_str}")
+        elif user_input.lower() == "inferences":
+            top = brain.inference.top_inferences(limit=15)
+            if not top:
+                print("  No inferences yet. Process more input or run infer:<concept>.")
+            else:
+                print(f"  Top {len(top)} inferences:")
+                for inf in top:
+                    print(f"    [{inf['confidence']:.2f}] {inf['subject']} "
+                          f"—[{inf['relation']}]→ {inf['object']}  "
+                          f"(chain_len={inf['chain_length']})")
         elif user_input.lower().startswith("relations:"):
             concept = user_input.split(":", 1)[1].strip()
             info = brain.relations.query_concept(concept)
