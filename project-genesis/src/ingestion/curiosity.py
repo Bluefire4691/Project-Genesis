@@ -4,18 +4,24 @@ Curiosity Engine — Ingestion Pipeline.
 Genesis decides what to learn next based on its own internal state.
 No external topic list. No engineer-specified curriculum.
 
-The scoring function:
-    curiosity(concept) = attention_relevance × (1 / max(1, relation_count))
+Primary signal — relation graph gaps:
+    Concepts that appear as objects (something affects them) but have
+    zero outgoing relations (Genesis cannot explain what they do) are
+    the highest-curiosity targets. Genesis knows they exist but not
+    what they are.
 
-High attention + low relations = Genesis is thinking about this concept
-but doesn't understand it well. That gap is what curiosity should fill.
+Secondary signal — working memory text items:
+    High-relevance TEXT memories where the concept has few relations.
+    Pattern/numeric memory keys are excluded — they're data labels,
+    not Wikipedia-searchable concepts.
+
+Scoring:
+    graph targets:  incoming_relation_count  (referenced often = important)
+    memory targets: attention × (1 / max(1, relation_count))
 
 This is the SOAR impasse-subgoaling mechanism applied to knowledge
 acquisition: when Genesis encounters a concept it cannot place in its
 existing knowledge structure, it creates a subgoal to resolve the gap.
-
-The curiosity engine makes that subgoal concrete — it identifies the
-concept and fetches Wikipedia to resolve the impasse.
 """
 
 import re
@@ -25,17 +31,23 @@ if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
 
 
-# Concepts that are too generic to fetch usefully
+# Words too generic to be useful Wikipedia search terms
 _SKIP_CONCEPTS = {
     "the", "and", "but", "for", "are", "was", "has", "had", "not",
     "this", "that", "with", "from", "they", "its", "can", "will",
     "fact", "neutral", "sentiment", "definition", "observation",
     "sequence", "pattern", "result", "value", "data", "item",
     "type", "kind", "form", "way", "thing", "time", "year",
-    "order", "level", "rate", "size", "number", "amount",
+    "order", "level", "rate", "size", "number", "amount", "after",
+    "only", "then", "fast", "slow", "high", "low", "large", "small",
+    "early", "late", "first", "last", "each", "some", "many", "more",
+    "most", "when", "where", "which", "what", "well", "also", "just",
+    "very", "than", "both", "even", "long", "such", "same", "other",
+    "become", "during", "between", "without", "within", "through",
+    "count", "total", "relative", "versus", "versus", "dominant",
+    "unknown", "multiple", "single", "complex", "simple",
 }
 
-# Minimum characters for a concept to be Wikipedia-searchable
 _MIN_CONCEPT_LEN = 4
 
 
@@ -43,13 +55,11 @@ class CuriosityEngine:
     """
     Identifies what Genesis most needs to learn next.
 
-    Scans working memory for high-attention, low-understanding concepts.
-    Returns them as Wikipedia search terms, ordered by curiosity score.
+    Primary source: relation graph — concepts Genesis knows exist
+    but cannot explain (referenced as objects, no outgoing relations).
 
-    Usage:
-        engine = CuriosityEngine(brain)
-        topics = engine.top_topics(n=5)
-        # ['gray wolf', 'coral reef', 'gene mutation', ...]
+    Fallback: working memory text items with high attention and low
+    relation density.
     """
 
     def __init__(self, brain: "Orchestrator"):
@@ -60,131 +70,154 @@ class CuriosityEngine:
         """
         Return the top N concepts Genesis is most curious about.
 
-        Scores each working-memory concept by:
-            attention_relevance × (1 / max(1, relation_count))
-
-        Concepts already fetched this session are excluded.
+        Prefers relation-graph gaps over memory key parsing.
+        Already-fetched topics are excluded.
         """
-        brain = self._brain
-        wm = brain.memory.memories
-        if not wm:
-            return self._fallback_topics(n)
+        candidates: list[tuple[float, str]] = []
 
-        # Score all working memory concepts
-        scored: list[tuple[float, str]] = []
-        seen: set[str] = set()
+        # Primary: graph gaps — concepts referenced but unexplained
+        candidates.extend(self._graph_gap_targets())
 
-        # Sort by relevance so we process most-attended first
-        sorted_wm = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)
+        # Secondary: high-attention text memories with low understanding
+        candidates.extend(self._memory_text_targets())
 
-        for key, mem in sorted_wm[:50]:
-            concept = self._extract_concept(key)
-            if not concept or concept in seen or concept in self._fetched_topics:
-                continue
-            seen.add(concept)
+        # Deduplicate, preserve highest score per concept
+        seen: dict[str, float] = {}
+        for score, concept in candidates:
+            if concept not in self._fetched_topics:
+                if concept not in seen or seen[concept] < score:
+                    seen[concept] = score
 
-            # Relation density: how much does Genesis already know about this?
-            rel_info = brain.relations.query_concept(concept, min_confidence=0.3)
-            relation_count = (
-                len(rel_info["as_subject"]) + len(rel_info["as_object"])
-            )
-
-            # Curiosity: high attention × low understanding
-            score = mem.relevance * (1.0 / max(1, relation_count))
-            scored.append((score, concept))
-
-        if not scored:
-            return self._fallback_topics(n)
-
-        scored.sort(reverse=True)
-        topics = [concept for _, concept in scored[:n]]
-
-        # Mark as fetched so we don't repeat
+        ranked = sorted(seen.items(), key=lambda kv: kv[1], reverse=True)
+        topics = [concept for concept, _ in ranked[:n]]
         self._fetched_topics.update(topics)
         return topics
 
     def curiosity_report(self) -> list[dict]:
         """Return scored curiosity candidates for inspection."""
+        candidates: dict[str, dict] = {}
+
+        for score, concept in self._graph_gap_targets():
+            candidates[concept] = {
+                "concept": concept,
+                "source": "graph_gap",
+                "curiosity_score": round(score, 3),
+                "already_fetched": concept in self._fetched_topics,
+            }
+
+        for score, concept in self._memory_text_targets():
+            if concept not in candidates:
+                candidates[concept] = {
+                    "concept": concept,
+                    "source": "memory",
+                    "curiosity_score": round(score, 3),
+                    "already_fetched": concept in self._fetched_topics,
+                }
+
+        report = sorted(candidates.values(),
+                        key=lambda r: r["curiosity_score"], reverse=True)
+        return report[:20]
+
+    # ------------------------------------------------------------------
+    # Primary signal: relation graph gaps
+    # ------------------------------------------------------------------
+
+    def _graph_gap_targets(self) -> list[tuple[float, str]]:
+        """
+        Find concepts that appear as relation objects but have no
+        outgoing relations of their own.
+
+        These are concepts Genesis has 'heard of' (something causes,
+        controls, or enables them) but cannot explain. Maximum gap
+        between awareness and understanding.
+        """
+        brain = self._brain
+        try:
+            conn = brain.memory._long_term.conn
+            cur = conn.execute("""
+                SELECT object, COUNT(*) as incoming_count
+                FROM relations
+                WHERE LOWER(object) NOT IN (
+                    SELECT DISTINCT LOWER(subject) FROM relations
+                )
+                GROUP BY object
+                ORDER BY incoming_count DESC
+                LIMIT 40
+            """)
+            rows = cur.fetchall()
+        except Exception:
+            return []
+
+        scored = []
+        for concept, incoming in rows:
+            clean = self._clean_concept(concept)
+            if not clean or clean in self._fetched_topics:
+                continue
+            # Score: how often is this concept referenced without explanation
+            scored.append((float(incoming), clean))
+
+        return scored
+
+    # ------------------------------------------------------------------
+    # Secondary signal: working memory text items
+    # ------------------------------------------------------------------
+
+    def _memory_text_targets(self) -> list[tuple[float, str]]:
+        """
+        High-attention text memories where the concept has few relations.
+        Explicitly excludes pattern: and num: keys — those are data labels.
+        """
         brain = self._brain
         wm = brain.memory.memories
         if not wm:
             return []
 
-        report = []
+        scored = []
         seen: set[str] = set()
+
         sorted_wm = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)
 
-        for key, mem in sorted_wm[:30]:
-            concept = self._extract_concept(key)
-            if not concept or concept in seen:
+        for key, mem in sorted_wm[:50]:
+            # Only use text memories — pattern/numeric keys are data labels
+            if not key.startswith("text:"):
+                continue
+
+            concept = self._key_to_concept(key)
+            if not concept or concept in seen or concept in self._fetched_topics:
                 continue
             seen.add(concept)
 
             rel_info = brain.relations.query_concept(concept, min_confidence=0.3)
-            relation_count = len(rel_info["as_subject"]) + len(rel_info["as_object"])
+            relation_count = (
+                len(rel_info["as_subject"]) + len(rel_info["as_object"])
+            )
+
             score = mem.relevance * (1.0 / max(1, relation_count))
+            scored.append((score, concept))
 
-            report.append({
-                "concept":        concept,
-                "attention":      round(mem.relevance, 3),
-                "relations_known": relation_count,
-                "curiosity_score": round(score, 3),
-                "already_fetched": concept in self._fetched_topics,
-            })
-
-        report.sort(key=lambda r: r["curiosity_score"], reverse=True)
-        return report
+        return scored
 
     # ------------------------------------------------------------------
-    # Internal
+    # Internal helpers
     # ------------------------------------------------------------------
 
-    def _extract_concept(self, key: str) -> str:
-        """
-        Extract a Wikipedia-searchable concept from a memory key.
-
-        Memory keys look like: 'text:wolves_control_deer' or
-        'pattern:forest_regrowth_sequence'. We extract the meaningful
-        leading words and clean them into a search phrase.
-        """
-        # Strip source prefix (text:, pattern:, num:)
-        raw = re.sub(r"^[a-z]+:", "", key)
-        # Replace underscores with spaces
-        raw = raw.replace("_", " ")
-        # Strip trailing digits and short suffixes
-        raw = re.sub(r"\s+\d+$", "", raw).strip()
-        # Take words
-        words = raw.split()
-        # Filter: skip generic/noise words, keep meaningful
+    def _clean_concept(self, concept: str) -> str:
+        """Clean a relation graph concept into a Wikipedia search phrase."""
+        # Replace underscores, normalize whitespace
+        clean = concept.replace("_", " ").strip().lower()
+        words = clean.split()
         meaningful = [
             w for w in words
-            if len(w) >= _MIN_CONCEPT_LEN and w.lower() not in _SKIP_CONCEPTS
+            if len(w) >= _MIN_CONCEPT_LEN and w not in _SKIP_CONCEPTS
         ]
         if not meaningful:
             return ""
-        # Use first 2-3 meaningful words as the search phrase
-        concept = " ".join(meaningful[:3]).strip()
-        # Final length check
-        if len(concept) < _MIN_CONCEPT_LEN:
-            return ""
-        return concept
+        result = " ".join(meaningful[:3])
+        return result if len(result) >= _MIN_CONCEPT_LEN else ""
 
-    def _fallback_topics(self, n: int) -> list[str]:
-        """
-        When working memory is empty, use the most-connected relation
-        graph concepts as curiosity targets — things Genesis knows
-        something about but could know more.
-        """
-        brain = self._brain
-        most_connected = brain.relations.most_connected(limit=n * 2)
-        topics = []
-        for entry in most_connected:
-            concept = entry.get("concept", "")
-            if (concept and len(concept) >= _MIN_CONCEPT_LEN
-                    and concept not in _SKIP_CONCEPTS
-                    and concept not in self._fetched_topics):
-                topics.append(concept)
-                self._fetched_topics.add(concept)
-            if len(topics) >= n:
-                break
-        return topics
+    def _key_to_concept(self, key: str) -> str:
+        """Extract a Wikipedia-searchable phrase from a text: memory key."""
+        # Strip 'text:' prefix
+        raw = re.sub(r"^text:", "", key)
+        return self._clean_concept(raw)
+
