@@ -433,6 +433,27 @@ class Orchestrator:
     # Query
     # ------------------------------------------------------------------
 
+    def fetch_knowledge(self, n_topics: int = 5, verbose: bool = True) -> dict:
+        """
+        Self-directed knowledge acquisition cycle.
+
+        Genesis examines its own working memory and relation graph to
+        identify what it most needs to learn (high attention, low relations),
+        then fetches Wikipedia articles on those concepts and processes them.
+
+        This is the curiosity drive becoming concrete behavior.
+        Returns a report of what was learned.
+        """
+        from ingestion.feeder import KnowledgeFeeder
+        feeder = KnowledgeFeeder(self, use_full_article=False)
+        return feeder.run(n_topics=n_topics, verbose=verbose)
+
+    def curiosity_report(self) -> list[dict]:
+        """Show what Genesis is most curious about without fetching anything."""
+        from ingestion.curiosity import CuriosityEngine
+        engine = CuriosityEngine(self)
+        return engine.curiosity_report()
+
     def infer(self, concept: str) -> dict:
         """
         Run transitive inference around a concept and return what Genesis can derive.

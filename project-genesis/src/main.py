@@ -19,6 +19,8 @@ Usage:
     python src/main.py --no-adaptive     # Use plain random shuffle instead of AdaptiveStream
     python src/main.py --voice           # Enable audio output (pyttsx3) if available
     python src/main.py --listen          # Enter microphone listen loop after run
+    python src/main.py --self-directed   # Genesis fetches Wikipedia on its own curiosity targets
+    python src/main.py --fetch-topics 5  # How many topics to fetch per curiosity cycle (default 5)
 """
 
 import sys
@@ -221,6 +223,52 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
 # Interactive mode
 # ------------------------------------------------------------------
 
+def run_self_directed(brain, n_cycles: int = 100, fetch_topics: int = 5,
+                      verbose: bool = True, adaptive: bool = True):
+    """
+    Self-directed learning mode: Genesis alternates between processing
+    its built-in pool and fetching Wikipedia on its own curiosity targets.
+
+    Rhythm: 50 cycles of pool → curiosity fetch → 50 cycles → fetch → ...
+    """
+    _header(f"SELF-DIRECTED MODE — {n_cycles} cycles + Wikipedia")
+    print("  Genesis will identify what it needs to learn and fetch it.")
+    print("  No topic list. Genesis decides.")
+    print()
+
+    batch_size = min(50, max(10, n_cycles // 10))
+    batches = max(1, n_cycles // batch_size)
+    remainder = n_cycles - (batches * batch_size)
+
+    for batch_num in range(batches):
+        _divider("-")
+        print(f"  Batch {batch_num + 1}/{batches} — processing {batch_size} cycles")
+        _divider("-")
+        run_open_stage(brain, n_cycles=batch_size, verbose=verbose, adaptive=adaptive)
+
+        # Genesis decides what to fetch
+        print(f"\n  Genesis examining its own knowledge gaps...")
+        brain.fetch_knowledge(n_topics=fetch_topics, verbose=True)
+
+        # Run inference after each knowledge acquisition
+        if hasattr(brain, 'inference'):
+            new_inferences = brain.inference.run(session_id=brain.session_id)
+            if new_inferences > 0 and verbose:
+                print(f"  [Inference] {new_inferences} new chain(s) derived")
+
+    # Remainder cycles
+    if remainder > 0:
+        run_open_stage(brain, n_cycles=remainder, verbose=verbose, adaptive=adaptive)
+
+    _header("SELF-DIRECTED RUN COMPLETE")
+    rel_stats = brain.relations.stats()
+    inf_stats = brain.inference.stats()
+    print(f"  Total relations:   {rel_stats.get('total_relations', 0)}")
+    print(f"  Total inferences:  {inf_stats.get('total_inferences', 0)}")
+    print(f"  Contradictions:    {brain.contradictions.count()}")
+    print()
+
+
 def run_listen_loop(brain):
     """
     Microphone listen loop: Genesis hears speech, processes it as text input,
@@ -266,6 +314,9 @@ def run_interactive(brain):
     print("    voice                — Genesis speaks from its current state")
     print("    voice:<concept>      — Genesis responds about a specific concept")
     print("    listen               — enter microphone listen loop")
+    print("    curiosity            — show what Genesis most wants to learn")
+    print("    learn                — Genesis fetches Wikipedia on its curiosity targets")
+    print("    learn:<N>            — fetch N topics (default 3)")
     print("    status               — full system status")
     print("    relations:<concept>  — what Genesis knows about a concept")
     print("    infer:<concept>      — what Genesis can derive (transitive chains)")
@@ -306,6 +357,30 @@ def run_interactive(brain):
                 print(f"  Genesis has not formed connections around '{concept}' yet.")
         elif user_input.lower() == "listen":
             run_listen_loop(brain)
+        elif user_input.lower() == "curiosity":
+            report = brain.curiosity_report()
+            if not report:
+                print("  Working memory empty — process more input first.")
+            else:
+                print(f"  Top curiosity targets ({len(report)}):")
+                for r in report[:10]:
+                    fetched = " [fetched]" if r["already_fetched"] else ""
+                    print(f"    [{r['curiosity_score']:.2f}] {r['concept']}"
+                          f"  (attention={r['attention']:.2f}, "
+                          f"relations={r['relations_known']}){fetched}")
+        elif user_input.lower().startswith("learn"):
+            n = 3
+            if ":" in user_input:
+                try:
+                    n = int(user_input.split(":", 1)[1].strip())
+                except ValueError:
+                    pass
+            print(f"  Genesis choosing {n} topics to learn about...")
+            report = brain.fetch_knowledge(n_topics=n, verbose=True)
+            new_infs = brain.inference.run(session_id=brain.session_id)
+            if new_infs > 0:
+                print(f"  [Inference] {new_infs} new chain(s) derived from new knowledge")
+            print(f"  Relations added: {report.get('relations_added', 0)}")
         elif user_input.lower() == "status":
             s = brain.full_status()
             print(json.dumps({
@@ -478,6 +553,8 @@ def main():
     adaptive = True
     use_voice = False
     use_listen = False
+    self_directed = False
+    fetch_topics = 5
     snapshot_label = None
 
     args = sys.argv[1:]
@@ -498,6 +575,19 @@ def main():
             use_voice = True
         elif arg == "--listen":
             use_listen = True
+        elif arg == "--self-directed":
+            self_directed = True
+        elif arg.startswith("--fetch-topics="):
+            try:
+                fetch_topics = int(arg.split("=")[1])
+            except ValueError:
+                pass
+        elif arg == "--fetch-topics" and i + 1 < len(args):
+            try:
+                fetch_topics = int(args[i + 1])
+                i += 1
+            except (ValueError, IndexError):
+                pass
         elif arg.startswith("--cycles="):
             try:
                 cycles = int(arg.split("=")[1])
@@ -532,7 +622,11 @@ def main():
         brain.curriculum.current_stage = Stage.OPEN
         print("  Skipping curriculum — starting at OPEN stage.")
 
-    run_open_stage(brain, n_cycles=cycles, verbose=verbose, adaptive=adaptive)
+    if self_directed:
+        run_self_directed(brain, n_cycles=cycles, fetch_topics=fetch_topics,
+                          verbose=verbose, adaptive=adaptive)
+    else:
+        run_open_stage(brain, n_cycles=cycles, verbose=verbose, adaptive=adaptive)
 
     # Optional named snapshot of the current attention state
     if snapshot_label:
