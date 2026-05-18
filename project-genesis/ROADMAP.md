@@ -194,6 +194,68 @@ After sufficient runtime, the archive contains behavioral data. Use it:
 - What does danger look like when it actually occurs?
 - Calibrate COMMITMENT_CYCLES, diversity thresholds, energy collapse definitions
   from observed behavioral patterns
+- Compile recurring state→outcome patterns into lightweight production rules
+  (SOAR chunking: convert deliberate search into reactive rules over time)
+
+### M15: Prediction Error Salience 🔲
+Replace wm_delta with a computed prediction-error signal grounded in Friston (2010).
+
+For each concept encountered per cycle, compute how much the input's assertions  
+about that concept *contradict or extend* existing RelationGraph beliefs.  
+`prediction_error(concept) = 1 - avg_confidence(existing relations for concept)`
+
+Use this as the primary archive significance signal. This replaces engineer-specified  
+source-type tagging with a signal the system generates from its own belief model —  
+the concrete step toward self-authored consolidation described in the amendment.
+
+Also: upgrade AdaptiveStream to precision-weighted scoring.  
+Items about low-confidence domains score higher; well-established domains score lower.
+
+### M16: Processor Voting 🔲
+Hawkins (2021): each cortical column builds a complete model; perception is consensus.
+
+Track when multiple processors (text, numeric, pattern) *independently* surface the  
+same concept or relation in a single cycle. Weight confidence by independent source  
+count, not by frequency from a single source. Three processors agreeing independently  
+should increase confidence more than one processor reporting the same thing three times.
+
+### M17: Active Curiosity — Directed Attention 🔲
+Convert GenesisVoice's unresolved-concept questions into active attention directives.
+
+SOAR (Newell): when the system reaches an impasse (concept encountered but no relations  
+formed), it creates a subgoal to resolve it. Currently Genesis surfaces these as  
+statements ("I have encountered X but cannot place it"). This milestone makes them  
+behavioral: unresolved concepts become attention directives that bias AdaptiveStream  
+until resolved. The question becomes a drive, not just an observation.
+
+### M18: Spreading Activation in Retrieval 🔲
+ACT-R (Anderson): when a concept is active in working memory, related concepts  
+(via RelationGraph proximity) receive a retrieval activation boost.
+
+Currently FTS5 retrieval is keyword-based. Spreading activation would use  
+graph proximity to prime related memories — making retrieval associative rather  
+than purely lexical. The RelationGraph already provides the graph; the work is  
+wiring proximity scores into the retrieval ranking.
+
+---
+
+## Research Foundation (May 2026)
+
+See `docs/research_notes.md` for primary-source review of all cited works.
+
+Key findings and their architecture status:
+- **Brooks (1986)**: ✅ Implemented (evolutionary layering) — suppress vs inhibit  
+  distinction not yet precise; suppress = replace input signal, inhibit = block output
+- **Sutton (2019)**: ✅ Response correct — his second point actively supports  
+  blank-start design ("build meta-methods, not knowledge")
+- **Friston (2010)**: ⚠️ wm_delta is crude prediction-error proxy; M15 upgrades this
+- **Clark (2013)**: ⚠️ Attention should be precision weighting, not selection; M15/M16
+- **Minsky (1986)**: ⚠️ K-line reconstruction and critic agents not yet built
+- **Hawkins (2021)**: 🔲 Voting across processors is M16
+- **LeDoux (1996)**: ✅ M1 IS the fast path — asymmetry should be threaded into  
+  working memory attention under resource pressure
+- **SOAR**: 🔲 Impasse → directed curiosity is M17
+- **ACT-R**: ⚠️ Spreading activation in retrieval is M18
 
 ---
 

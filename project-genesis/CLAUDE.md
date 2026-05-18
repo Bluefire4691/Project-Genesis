@@ -151,6 +151,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | `src/main.py` | CLI entry point. See --help equivalent in module docstring. |
 | `docs/architecture_amendment_v0.2.md` | Architecture amendment with review decisions |
 | `docs/m1_interface_spec.md` | M1 contract: what higher layers can count on |
+| `docs/research_notes.md` | Primary-source review of all cited works with Genesis implications |
 | `ROADMAP.md` | Milestone plan with rationale |
 | `SESSION_LOG.md` | Per-session development log |
 
