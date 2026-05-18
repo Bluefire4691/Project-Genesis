@@ -18,6 +18,7 @@ Covers:
 - wm_delta in process_input result
 - novel flag in process_input result
 - full_status includes inference stats
+- IS_A property inheritance (cats IS_A mammal, mammal CONTAINS fur → cats CONTAINS fur)
 """
 
 import sys
@@ -487,3 +488,144 @@ class TestOrchestratorIntegration:
         brain = _brain()
         assert hasattr(brain, "inference")
         assert isinstance(brain.inference, InferenceEngine)
+
+
+# ------------------------------------------------------------------
+# IS_A Property Inheritance
+# ------------------------------------------------------------------
+
+class TestISAInheritance:
+    """IS_A property inheritance: X IS_A Y, Y REL Z → infer X REL Z."""
+
+    def test_direct_property_inherited(self):
+        """cats IS_A mammal, mammal CONTAINS fur → cats HAS fur."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "cats", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "CONTAINS", "fur", conf=0.8)
+        eng.run()
+        result = eng.query("cats")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CONTAINS", "fur") in subjects
+
+    def test_multiple_properties_inherited(self):
+        """Child inherits all parent properties."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "dogs", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "CONTAINS", "fur", conf=0.8)
+        _add(brain, "mammal", "REQUIRES", "oxygen", conf=0.85)
+        eng.run()
+        result = eng.query("dogs")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CONTAINS", "fur") in subjects
+        assert ("REQUIRES", "oxygen") in subjects
+
+    def test_sibling_categories_independent(self):
+        """cats IS_A mammal, dogs IS_A mammal — cats inherits mammal props, not dog props."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "cats", "IS_A", "mammal", conf=0.9)
+        _add(brain, "dogs", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "CONTAINS", "fur", conf=0.8)
+        _add(brain, "dogs", "CONTAINS", "loyalty", conf=0.8)
+        eng.run()
+        cats_result = eng.query("cats")
+        cats_subjects = [(r["relation"], r["object"]) for r in cats_result["as_subject"]]
+        # cats should inherit fur from mammal
+        assert ("CONTAINS", "fur") in cats_subjects
+        # cats should NOT inherit loyalty (that belongs to dogs, not mammal)
+        assert ("CONTAINS", "loyalty") not in cats_subjects
+
+    def test_inheritance_confidence_decayed(self):
+        """Inherited confidence < both parent confidences."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "poodle", "IS_A", "dog", conf=0.9)
+        _add(brain, "dog", "CONTAINS", "teeth", conf=0.9)
+        eng.run()
+        result = eng.query("poodle")
+        inherited = [r for r in result["as_subject"]
+                     if r["relation"] == "CONTAINS" and r["object"] == "teeth"]
+        assert inherited
+        # Should be less than the direct confidence of either edge
+        assert inherited[0]["confidence"] < 0.9
+
+    def test_no_self_loop(self):
+        """Child IS_A parent, parent CAUSES child → no self-loop inference."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "cats", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "CAUSES", "cats", conf=0.8)
+        eng.run()
+        result = eng.query("cats")
+        # Should not produce cats CAUSES cats
+        loops = [r for r in result["as_subject"]
+                 if r["subject"] == r["object"]]
+        assert not loops
+
+    def test_is_a_not_inherited_from_parent(self):
+        """IS_A relations of the parent are not passed down (that's transitive IS_A, separate)."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "cats", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "IS_A", "animal", conf=0.9)
+        eng.run()
+        result = eng.query("cats")
+        # The IS_A mammal→animal should NOT create a new HAS/etc inheritance —
+        # but transitively cats IS_A animal is handled by _infer_from, not _infer_inheritance
+        # Just check that _infer_inheritance doesn't duplicate IS_A chains oddly
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        # No non-IS_A relations should be spuriously added
+        non_isa = [(rel, obj) for rel, obj in subjects if rel != "IS_A"]
+        assert non_isa == []
+
+    def test_low_confidence_not_inherited(self):
+        """Property below _MIN_EDGE_CONF threshold is not inherited."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "cats", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "CONTAINS", "fur", conf=0.1)  # too low
+        eng.run()
+        result = eng.query("cats")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CONTAINS", "fur") not in subjects
+
+    def test_infer_method_triggers_inheritance(self):
+        """brain.infer(concept) also triggers inheritance for that concept."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "whale", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "CONTAINS", "lungs", conf=0.85)
+        eng.infer("whale")
+        result = eng.query("whale")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CONTAINS", "lungs") in subjects
+
+    def test_transitive_is_a_chain_inherits(self):
+        """poodle IS_A dog IS_A mammal, mammal CONTAINS fur → poodle HAS fur via transitive IS_A."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "poodle", "IS_A", "dog", conf=0.95)
+        _add(brain, "dog", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "CONTAINS", "fur", conf=0.8)
+        # First run builds transitive IS_A: poodle IS_A mammal (in inferences table)
+        # Second run uses that inferred IS_A to inherit fur
+        eng.run()
+        eng.run()  # second pass picks up inferred IS_A edges
+        result = eng.query("poodle")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CONTAINS", "fur") in subjects
+
+    def test_inheritance_chain_stored_with_two_hops(self):
+        """Inherited property stored with chain_length == 2."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "cats", "IS_A", "mammal", conf=0.9)
+        _add(brain, "mammal", "CONTAINS", "fur", conf=0.8)
+        eng.run()
+        result = eng.query("cats")
+        inherited = [r for r in result["as_subject"]
+                     if r["relation"] == "CONTAINS" and r["object"] == "fur"]
+        assert inherited
+        assert inherited[0]["chain_length"] == 2

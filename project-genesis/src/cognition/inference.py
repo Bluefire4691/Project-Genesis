@@ -19,6 +19,14 @@ Transitivity rules — same relation type propagates:
     A ENABLES B,  B ENABLES C  → A ENABLES C
     A IS_A B,     B IS_A C     → A IS_A C
 
+IS_A property inheritance — cross-type propagation:
+    A IS_A B, B REL C → A REL C   (A inherits B's properties)
+
+    If Genesis learns "cats IS_A mammal" and "mammals CONTAINS fur", it infers
+    "cats CONTAINS fur" without ever having been told directly. This is the
+    mechanism behind the "cats vs dogs" distinction — new facts about a
+    category automatically apply to all known members.
+
 Compound confidence per chain:
     conf = Π(hop_confidences) × HOP_DECAY^(chain_length − 1)
 
@@ -108,7 +116,7 @@ class InferenceEngine:
 
     def run(self, session_id: str = "") -> int:
         """
-        Run transitive inference over all known concepts.
+        Run transitive inference and IS_A property inheritance over all concepts.
 
         Returns the number of new inferences added this call.
         """
@@ -121,6 +129,7 @@ class InferenceEngine:
         before = self._count()
         for concept in concepts:
             self._infer_from(concept, session_id)
+        self._infer_inheritance(session_id)
         return self._count() - before
 
     def infer(self, concept: str, session_id: str = "") -> dict:
@@ -130,6 +139,7 @@ class InferenceEngine:
         normed = _norm(concept)
         if normed:
             self._infer_from(normed, session_id)
+            self._infer_inheritance(session_id, subject_filter=normed)
         return self.query(normed)
 
     # ------------------------------------------------------------------
@@ -180,6 +190,55 @@ class InferenceEngine:
                                 )
 
                 queue.append((obj, new_steps, new_prod))
+
+    def _infer_inheritance(
+        self, session_id: str, subject_filter: Optional[str] = None
+    ) -> None:
+        """
+        IS_A property inheritance: X IS_A Y, Y REL Z → infer X REL Z.
+
+        Checks both observed relations and previously inferred IS_A chains so
+        that multi-hop IS_A paths (cats→felines→mammals→animals) propagate
+        properties in a single call once the IS_A transitive closure is built.
+
+        subject_filter: if set, only inherit for that specific child concept.
+        """
+        # Collect IS_A edges from observed relations
+        q_obs = "SELECT subject, object, confidence FROM relations WHERE rel_type = 'IS_A' AND confidence >= ?"
+        params_obs: tuple = (_MIN_EDGE_CONF,)
+        if subject_filter:
+            q_obs += " AND subject = ?"
+            params_obs = (_MIN_EDGE_CONF, subject_filter)
+        is_a_pairs = self._conn.execute(q_obs, params_obs).fetchall()
+
+        # Also collect IS_A edges from inferred table (covers transitive IS_A chains)
+        q_inf = "SELECT subject, object, confidence FROM relation_inferences WHERE rel_type = 'IS_A' AND confidence >= ?"
+        params_inf: tuple = (_MIN_EDGE_CONF,)
+        if subject_filter:
+            q_inf += " AND subject = ?"
+            params_inf = (_MIN_EDGE_CONF, subject_filter)
+        is_a_pairs += self._conn.execute(q_inf, params_inf).fetchall()
+
+        for child, parent, is_a_conf in is_a_pairs:
+            if child == parent:
+                continue
+            # Find all non-IS_A properties of the parent
+            parent_props = self._conn.execute(
+                "SELECT rel_type, object, confidence FROM relations "
+                "WHERE subject = ? AND rel_type != 'IS_A' AND confidence >= ?",
+                (parent, _MIN_EDGE_CONF),
+            ).fetchall()
+
+            for rel_type, obj, prop_conf in parent_props:
+                if obj == child:
+                    continue
+                inferred_conf = is_a_conf * prop_conf * _HOP_DECAY
+                if inferred_conf >= _MIN_CONFIDENCE:
+                    steps = [
+                        (child, "IS_A", parent, is_a_conf),
+                        (parent, rel_type, obj, prop_conf),
+                    ]
+                    self._store(child, rel_type, obj, inferred_conf, steps, session_id)
 
     def _outgoing(self, concept: str) -> list[tuple]:
         """Return (rel_type, object, confidence) for transitive edges from concept."""
