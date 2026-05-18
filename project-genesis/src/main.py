@@ -305,6 +305,101 @@ def run_listen_loop(brain):
           f"failed: {stats['failed_captures']}")
 
 
+def _print_summary(brain):
+    """
+    Human-readable summary of what Genesis knows and has derived.
+
+    Shows the three most meaningful signals of genuine learning:
+      1. Knowledge base size and connectivity
+      2. Inferences — things Genesis derived, not just stored
+      3. What Genesis is currently focused on and curious about
+    """
+    _header("GENESIS KNOWLEDGE SUMMARY")
+
+    # --- Knowledge base ---
+    conn = brain.relations._conn
+    rel_stats = brain.relations.stats()
+    total_relations = rel_stats.get("total_relations", 0)
+    by_type = rel_stats.get("by_type", {})
+
+    # Connectivity: average relations per unique concept
+    concept_rows = conn.execute(
+        "SELECT subject AS c FROM relations UNION SELECT object AS c FROM relations"
+    ).fetchall()
+    unique_concepts = len(concept_rows)
+    connectivity = round(total_relations / max(1, unique_concepts), 2)
+
+    # Most-connected concepts (appear most as subject OR object)
+    top_concepts = conn.execute("""
+        SELECT concept, COUNT(*) AS degree FROM (
+            SELECT subject AS concept FROM relations
+            UNION ALL
+            SELECT object  AS concept FROM relations
+        ) GROUP BY concept ORDER BY degree DESC LIMIT 5
+    """).fetchall()
+
+    print("  Knowledge base:")
+    print(f"    {total_relations} observed relations across {unique_concepts} concepts "
+          f"(avg {connectivity} per concept)")
+    if by_type:
+        type_summary = ", ".join(f"{k}:{v}" for k, v in
+                                 sorted(by_type.items(), key=lambda x: -x[1]))
+        print(f"    Types: {type_summary}")
+    if top_concepts:
+        top_str = ", ".join(f"{r[0]} ({r[1]})" for r in top_concepts)
+        print(f"    Most connected: {top_str}")
+    print()
+
+    # --- Inferences ---
+    inf_stats = brain.inference.stats()
+    total_inf = inf_stats.get("total_inferences", 0)
+    inf_by_type = inf_stats.get("by_type", {})
+    top_infs = brain.inference.top_inferences(limit=5)
+
+    print("  Derived knowledge (inferences):")
+    if total_inf == 0:
+        print("    None yet — Genesis needs more interconnected relations.")
+        print("    Tip: run 'learn' a few times, then 'inferences' to check.")
+    else:
+        print(f"    {total_inf} inferences derived from observed relations")
+        if inf_by_type:
+            inf_type_str = ", ".join(f"{k}:{v}" for k, v in
+                                     sorted(inf_by_type.items(), key=lambda x: -x[1]))
+            print(f"    Types: {inf_type_str}")
+        print()
+        print("    Most confident derived facts:")
+        for inf in top_infs:
+            chain_concepts = [inf["subject"]]
+            chain_concepts.append(inf["object"])
+            print(f"      [{inf['confidence']:.2f}] {inf['subject']} "
+                  f"—[{inf['relation']}]→ {inf['object']}  "
+                  f"(derived in {inf['chain_length']} steps)")
+    print()
+
+    # --- Attention / focus ---
+    wm = brain.memory.memories
+    if wm:
+        top_mem = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)[:5]
+        print("  What Genesis is currently focused on:")
+        for key, mem in top_mem:
+            # Strip prefix for readability
+            label = key.split(":", 1)[-1] if ":" in key else key
+            label = label.replace("_", " ")[:50]
+            print(f"    [{mem.relevance:.2f}] {label}")
+        print()
+
+    # --- Curiosity ---
+    curiosity = brain.curiosity_report()[:5]
+    if curiosity:
+        unfetched = [c for c in curiosity if not c.get("already_fetched")]
+        print("  What Genesis most wants to learn next:")
+        for c in unfetched[:4]:
+            src = "graph gap" if c["source"] == "graph_gap" else "memory"
+            print(f"    [{c['curiosity_score']:.2f}] {c['concept']}  ({src})")
+    print()
+    _divider()
+
+
 def run_interactive(brain):
     _header("INTERACTIVE MODE")
     print("  Commands:")
@@ -317,7 +412,8 @@ def run_interactive(brain):
     print("    curiosity            — show what Genesis most wants to learn")
     print("    learn                — Genesis fetches Wikipedia on its curiosity targets")
     print("    learn:<N>            — fetch N topics (default 3)")
-    print("    status               — full system status")
+    print("    summary              — what Genesis knows and has derived (readable)")
+    print("    status               — full system status (JSON)")
     print("    relations:all        — show every stored relation")
     print("    relations:<concept>  — what Genesis knows about a concept")
     print("    infer:<concept>      — what Genesis can derive (transitive chains)")
@@ -382,6 +478,8 @@ def run_interactive(brain):
             if new_infs > 0:
                 print(f"  [Inference] {new_infs} new chain(s) derived from new knowledge")
             print(f"  Relations added: {report.get('relations_added', 0)}")
+        elif user_input.lower() == "summary":
+            _print_summary(brain)
         elif user_input.lower() == "status":
             s = brain.full_status()
             print(json.dumps({
