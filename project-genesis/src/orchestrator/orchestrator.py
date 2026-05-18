@@ -72,6 +72,7 @@ class Orchestrator:
         survival: SurvivalOS | None = None,
         interaction: InteractionLayer | None = None,
         channel: OutputChannel | None = None,
+        working_capacity: int = 500,
     ):
         self.processors = {
             "text":    TextProcessor(),
@@ -79,8 +80,12 @@ class Orchestrator:
             "pattern": PatternProcessor(),
         }
 
-        # Memory system — optionally with explicit DB path
-        self.memory = MemorySystem(db_path=db_path) if db_path else MemorySystem()
+        # Memory system — optionally with explicit DB path and working capacity
+        self.memory = (
+            MemorySystem(db_path=db_path, working_capacity=working_capacity)
+            if db_path else
+            MemorySystem(working_capacity=working_capacity)
+        )
         self.curriculum = CurriculumEngine()
         self.verbose = verbose
         self.cycle_count = 0
@@ -441,18 +446,20 @@ class Orchestrator:
         identify what it most needs to learn (high attention, low relations),
         then fetches Wikipedia articles on those concepts and processes them.
 
-        This is the curiosity drive becoming concrete behavior.
-        Returns a report of what was learned.
+        The feeder is created once and reused across calls so that
+        already-fetched and already-failed topics are never retried.
         """
-        from ingestion.feeder import KnowledgeFeeder
-        feeder = KnowledgeFeeder(self, use_full_article=False)
-        return feeder.run(n_topics=n_topics, verbose=verbose)
+        if not hasattr(self, "_feeder") or self._feeder is None:
+            from ingestion.feeder import KnowledgeFeeder
+            self._feeder = KnowledgeFeeder(self, use_full_article=False)
+        return self._feeder.run(n_topics=n_topics, verbose=verbose)
 
     def curiosity_report(self) -> list[dict]:
         """Show what Genesis is most curious about without fetching anything."""
-        from ingestion.curiosity import CuriosityEngine
-        engine = CuriosityEngine(self)
-        return engine.curiosity_report()
+        if not hasattr(self, "_feeder") or self._feeder is None:
+            from ingestion.feeder import KnowledgeFeeder
+            self._feeder = KnowledgeFeeder(self, use_full_article=False)
+        return self._feeder.curiosity_report()
 
     def infer(self, concept: str) -> dict:
         """

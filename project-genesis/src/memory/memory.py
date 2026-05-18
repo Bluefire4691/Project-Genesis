@@ -52,7 +52,7 @@ class MemorySystem:
 
     New capabilities vs M0:
         - All memories persist to disk (SQLite) — survive process restart
-        - Working memory bounded to `working_capacity` items (default 100)
+        - Working memory bounded to `working_capacity` items (default 500)
         - FTS5 full-text search across the full corpus (not just working mem)
         - Organic co-occurrence associations + explicit links
         - Evicted memories migrate to long-term, not dropped
@@ -61,7 +61,7 @@ class MemorySystem:
     def __init__(
         self,
         db_path: str = _DEFAULT_DB,
-        working_capacity: int = 100,
+        working_capacity: int = 500,
     ):
         self._long_term = LongTermStore(db_path)
         self._working = WorkingMemory(capacity=working_capacity)

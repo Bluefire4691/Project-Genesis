@@ -52,6 +52,11 @@ class KnowledgeFeeder:
         self._total_topics_fetched: int = 0
         self._total_chunks_processed: int = 0
         self._total_relations_before: int = 0
+        self._failed_topics: set[str] = set()  # never retry Wikipedia 404s
+
+    # Maximum topics per run — prevents runaway fetching when graph is sparse.
+    # Large requests (learn:200) are silently capped; quality beats quantity.
+    _MAX_TOPICS_PER_RUN = 10
 
     def run(self, n_topics: int = 5, verbose: bool = True) -> dict:
         """
@@ -60,12 +65,21 @@ class KnowledgeFeeder:
         Genesis identifies its top N curiosity targets, fetches
         Wikipedia articles for each, and processes all chunks.
 
+        n_topics is capped at _MAX_TOPICS_PER_RUN. Use the self-directed
+        loop (--self-directed) to process many topics across multiple cycles
+        with knowledge integration between each batch.
+
         Returns a report of what was learned.
         """
         brain = self._brain
+        n_topics = min(n_topics, self._MAX_TOPICS_PER_RUN)
 
         # What does Genesis want to know about?
-        topics = self._curiosity.top_topics(n=n_topics)
+        # Exclude previously failed topics so Wikipedia 404s are never retried.
+        topics = [
+            t for t in self._curiosity.top_topics(n=n_topics)
+            if t not in self._failed_topics
+        ]
 
         if not topics:
             return {
@@ -143,6 +157,7 @@ class KnowledgeFeeder:
         if not text:
             if verbose:
                 print(f"  [Curiosity] ✗ Could not fetch '{topic}'")
+            self._failed_topics.add(topic)  # never retry this topic
             return {
                 "topic": topic, "title": "", "success": False,
                 "chunks_processed": 0, "elapsed_s": 0,

@@ -556,6 +556,7 @@ def main():
     self_directed = False
     fetch_topics = 5
     snapshot_label = None
+    memory_size = 500
 
     args = sys.argv[1:]
     i = 0
@@ -602,6 +603,17 @@ def main():
         elif arg == "--snapshot" and i + 1 < len(args):
             snapshot_label = args[i + 1]
             i += 1
+        elif arg.startswith("--memory-size="):
+            try:
+                memory_size = int(arg.split("=")[1])
+            except ValueError:
+                pass
+        elif arg == "--memory-size" and i + 1 < len(args):
+            try:
+                memory_size = int(args[i + 1])
+                i += 1
+            except (ValueError, IndexError):
+                pass
         i += 1
 
     # M13: Output channel selection
@@ -611,7 +623,10 @@ def main():
         if channel.name == "text":
             print("  (pyttsx3 not installed — falling back to text)")
 
-    brain = Orchestrator(verbose=verbose, resume=resume, channel=channel)
+    brain = Orchestrator(
+        verbose=verbose, resume=resume, channel=channel,
+        working_capacity=memory_size,
+    )
 
     if resume and brain.curriculum.current_stage == Stage.OPEN:
         print(f"  [RESUME] Picking up from cycle {brain.cycle_count} "
