@@ -38,6 +38,8 @@ from orchestrator.integration import IntegrationLayer
 from cognition.inference import InferenceEngine
 from cognition.contradictions import ContradictionLog
 from cognition.ethics import EthicsLens
+from output.channel import OutputChannel, TextChannel
+from output.voice import GenesisVoice
 
 
 class Orchestrator:
@@ -69,6 +71,7 @@ class Orchestrator:
         resume: bool = False,
         survival: SurvivalOS | None = None,
         interaction: InteractionLayer | None = None,
+        channel: OutputChannel | None = None,
     ):
         self.processors = {
             "text":    TextProcessor(),
@@ -102,6 +105,9 @@ class Orchestrator:
             else InteractionLayer(self.memory)
         )
         self.integrator = IntegrationLayer(self.memory)
+
+        # M13: Voice output — speaks from internal state, not from LLM
+        self.voice = GenesisVoice(self, channel=channel or TextChannel())
 
         # Restore previous session state if requested
         if resume:
@@ -206,7 +212,7 @@ class Orchestrator:
         # Store everything if resources allow
         wm_before = len(self.memory.memories)
         if self.survival.can("memory_store"):
-            stored_keys = self._store_synthesis(synthesis, data, novel=novel)
+            stored_keys, new_contradictions = self._store_synthesis(synthesis, data, novel=novel)
             wm_delta = len(self.memory.memories) - wm_before
             if self.survival.can("logging"):
                 novel_tag = " [NOVEL]" if novel else ""
@@ -228,6 +234,7 @@ class Orchestrator:
         else:
             stored_keys = []
             wm_delta = 0
+            new_contradictions = 0
             if self.survival.can("logging"):
                 self._log("  Memory storage skipped (emergency throttle)")
 
@@ -235,6 +242,13 @@ class Orchestrator:
         if self.survival.can("curriculum") and self.curriculum.should_advance():
             if self.curriculum.advance() and self.verbose:
                 self._log(f"  🎓 ADVANCED to {self.curriculum.current_stage.name}!")
+
+        # M13: Spontaneous expression triggered by internal signals
+        expression = self._maybe_express(
+            novel=novel,
+            wm_delta=wm_delta,
+            new_contradictions=new_contradictions,
+        )
 
         return {
             "status": "processed",
@@ -249,6 +263,7 @@ class Orchestrator:
             "throttle": self.survival.resource.throttle_level.name,
             "novel": novel,
             "wm_delta": wm_delta,
+            "expression": expression,
         }
 
     def _active_processors(self, input_type: str) -> dict:
@@ -292,6 +307,34 @@ class Orchestrator:
             pass
 
         return True
+
+    def _maybe_express(
+        self,
+        novel: bool,
+        wm_delta: int,
+        new_contradictions: int = 0,
+    ) -> str | None:
+        """
+        Trigger spontaneous voice expression if internal signals warrant it.
+
+        Priority: novel > contradiction > inference (high delta) > attention (any delta).
+        Only fires when the text channel is available (not under emergency throttle).
+        The voice itself applies an additional probability gate (expression_rate).
+        """
+        if not self.survival.can("text"):
+            return None
+
+        trigger: str | None = None
+        if novel:
+            trigger = "novel"
+        elif new_contradictions > 0:
+            trigger = "contradiction"
+        elif wm_delta > 2:
+            trigger = "inference"
+        elif wm_delta > 0:
+            trigger = "attention"
+
+        return self.voice.express(trigger=trigger)
 
     def _relations_conn_concepts(self) -> set[str]:
         """Return set of all concept words currently in the relation graph."""
@@ -378,12 +421,13 @@ class Orchestrator:
                     relations_added += 1
 
         # Contradiction scan after any new relations are added
+        new_conflicts = 0
         if relations_added > 0:
             new_conflicts = self.contradictions.scan(session_id=self.session_id)
             if new_conflicts > 0 and self.survival.can("logging"):
                 self._log(f"  ⚡ {new_conflicts} new contradiction(s) detected")
 
-        return stored_keys
+        return stored_keys, new_conflicts
 
     # ------------------------------------------------------------------
     # Query
@@ -489,6 +533,7 @@ class Orchestrator:
             "relations": self.relations.stats(),
             "inference": self.inference.stats(),
             "contradictions": self.contradictions.stats(),
+            "voice": self.voice.stats(),
             "processors": list(self.processors.keys()),
         }
         status.update(self.survival.report())

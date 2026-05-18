@@ -17,6 +17,8 @@ Usage:
     python src/main.py --resume          # Resume from last checkpoint
     python src/main.py --snapshot label  # Save a named snapshot at end
     python src/main.py --no-adaptive     # Use plain random shuffle instead of AdaptiveStream
+    python src/main.py --voice           # Enable audio output (pyttsx3) if available
+    python src/main.py --listen          # Enter microphone listen loop after run
 """
 
 import sys
@@ -29,6 +31,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from orchestrator.orchestrator import Orchestrator
 from curriculum.open_stage import DataStream, advance_to_open
 from curriculum.adaptive_stream import AdaptiveStream
+from output.channel import OutputChannel
+from output.microphone import MicrophoneInput
 from utils.types import Stage
 
 
@@ -217,12 +221,51 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
 # Interactive mode
 # ------------------------------------------------------------------
 
+def run_listen_loop(brain):
+    """
+    Microphone listen loop: Genesis hears speech, processes it as text input,
+    and responds from its internal state. Runs until 'goodbye genesis' is spoken
+    or KeyboardInterrupt.
+    """
+    mic = MicrophoneInput()
+    if not mic.available():
+        print("  Microphone input unavailable (install SpeechRecognition + pyaudio).")
+        return
+
+    _header("LISTEN MODE — speak to Genesis")
+    print("  Genesis is listening. Say 'goodbye genesis' to stop.")
+    print()
+
+    def _handle(text: str):
+        print(f"\n  [You] {text}")
+        result = brain.process_input("text", text)
+        response = brain.voice.respond(text.split()[0].lower() if text.split() else "")
+        if not response:
+            response = brain.voice.compose()
+        if response:
+            print(f"  [Genesis] {response}")
+        return True  # keep looping
+
+    try:
+        mic.listen_loop(_handle, stop_phrase="goodbye genesis")
+    except KeyboardInterrupt:
+        pass
+
+    print("\n  Listen loop ended.")
+    stats = mic.stats()
+    print(f"  Captured: {stats['total_captures']} phrases, "
+          f"failed: {stats['failed_captures']}")
+
+
 def run_interactive(brain):
     _header("INTERACTIVE MODE")
     print("  Commands:")
     print("    <query>              — search memory")
     print("    feed:<type>:<data>   — give Genesis new input")
     print("    express              — show current expression snapshot")
+    print("    voice                — Genesis speaks from its current state")
+    print("    voice:<concept>      — Genesis responds about a specific concept")
+    print("    listen               — enter microphone listen loop")
     print("    status               — full system status")
     print("    relations:<concept>  — what Genesis knows about a concept")
     print("    infer:<concept>      — what Genesis can derive (transitive chains)")
@@ -252,6 +295,17 @@ def run_interactive(brain):
             break
         if user_input.lower() == "express":
             _show_expression(brain)
+        elif user_input.lower() == "voice":
+            stmt = brain.voice.express(force=True)
+            if not stmt:
+                print("  Genesis has nothing to say yet — process more input first.")
+        elif user_input.lower().startswith("voice:"):
+            concept = user_input.split(":", 1)[1].strip()
+            stmt = brain.voice.respond(concept)
+            if not stmt:
+                print(f"  Genesis has not formed connections around '{concept}' yet.")
+        elif user_input.lower() == "listen":
+            run_listen_loop(brain)
         elif user_input.lower() == "status":
             s = brain.full_status()
             print(json.dumps({
@@ -422,6 +476,8 @@ def main():
     open_only = False
     resume = False
     adaptive = True
+    use_voice = False
+    use_listen = False
     snapshot_label = None
 
     args = sys.argv[1:]
@@ -438,6 +494,10 @@ def main():
             resume = True
         elif arg == "--no-adaptive":
             adaptive = False
+        elif arg == "--voice":
+            use_voice = True
+        elif arg == "--listen":
+            use_listen = True
         elif arg.startswith("--cycles="):
             try:
                 cycles = int(arg.split("=")[1])
@@ -454,7 +514,14 @@ def main():
             i += 1
         i += 1
 
-    brain = Orchestrator(verbose=verbose, resume=resume)
+    # M13: Output channel selection
+    channel = OutputChannel.best_available(prefer_audio=use_voice)
+    if use_voice:
+        print(f"  Output channel: {channel.name}")
+        if channel.name == "text":
+            print("  (pyttsx3 not installed — falling back to text)")
+
+    brain = Orchestrator(verbose=verbose, resume=resume, channel=channel)
 
     if resume and brain.curriculum.current_stage == Stage.OPEN:
         print(f"  [RESUME] Picking up from cycle {brain.cycle_count} "
@@ -478,6 +545,8 @@ def main():
 
     if interactive:
         run_interactive(brain)
+    elif use_listen:
+        run_listen_loop(brain)
 
     _divider()
     print("  Build the foundation first. Then give it the world.")
