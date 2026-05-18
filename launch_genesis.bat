@@ -23,7 +23,8 @@ if errorlevel 1 (
 )
 
 echo  Starting Genesis... resuming previous session.
-echo  Type  help  at the prompt for available commands.
+echo  Type  chat  to talk to Genesis directly.
+echo  Type  help  for all available commands.
 echo  Type  quit  to exit.
 echo.
 

@@ -305,6 +305,42 @@ def run_listen_loop(brain):
           f"failed: {stats['failed_captures']}")
 
 
+def run_chat(brain):
+    """
+    Conversational mode — the user speaks naturally and Genesis replies
+    from its own knowledge, inferences, and curiosity.
+
+    Every message is simultaneously processed as new knowledge (Genesis
+    keeps learning from the conversation) and responded to based on what
+    Genesis already knows. Genesis will ask questions when it's curious.
+    """
+    _header("CONVERSATION")
+    print("  Talk to Genesis. It will respond from its own knowledge.")
+    print("  Type 'bye' or press Ctrl+C to return to interactive mode.")
+    print()
+
+    # Show what Genesis wants to open with
+    opening = brain.voice.compose(trigger="attention")
+    if opening:
+        print(f"  Genesis: {opening}")
+        print()
+
+    while True:
+        try:
+            user_text = input("  You: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            break
+        if not user_text:
+            continue
+        if user_text.lower() in ("bye", "exit", "goodbye", "quit"):
+            print("  [returning to interactive mode]")
+            break
+
+        response = brain.voice.chat_respond(user_text)
+        print(f"\n  Genesis: {response}\n")
+
+
 def _print_summary(brain):
     """
     Human-readable summary of what Genesis knows and has derived.
@@ -412,6 +448,7 @@ def run_interactive(brain):
     print("    curiosity            — show what Genesis most wants to learn")
     print("    learn                — Genesis fetches Wikipedia on its curiosity targets")
     print("    learn:<N>            — fetch N topics (default 3)")
+    print("    chat                 — talk to Genesis; it responds from its own knowledge")
     print("    summary              — what Genesis knows and has derived (readable)")
     print("    status               — full system status (JSON)")
     print("    relations:all        — show every stored relation")
@@ -478,6 +515,8 @@ def run_interactive(brain):
             if new_infs > 0:
                 print(f"  [Inference] {new_infs} new chain(s) derived from new knowledge")
             print(f"  Relations added: {report.get('relations_added', 0)}")
+        elif user_input.lower() in ("chat", "talk", "converse"):
+            run_chat(brain)
         elif user_input.lower() == "summary":
             _print_summary(brain)
         elif user_input.lower() == "status":

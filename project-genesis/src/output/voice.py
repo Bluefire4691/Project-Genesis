@@ -125,6 +125,125 @@ class GenesisVoice:
             self._deliver(statement)
         return statement
 
+    def chat_respond(self, user_text: str) -> str:
+        """
+        Receive user input, learn from it, and produce a conversational reply.
+
+        Genesis does two things simultaneously:
+          1. Processes the text as new knowledge (always learns from conversation)
+          2. Searches its existing knowledge for what it knows about the concepts
+             mentioned, and replies from that — not from a template, from its
+             actual processing history.
+
+        Returns a non-empty response string.
+        """
+        # Learn from what was said
+        result = self._brain.process_input("text", user_text)
+        novel   = result.get("novel", False)
+        wm_delta = result.get("wm_delta", 0)
+
+        # Extract concepts the user mentioned, prioritising ones Genesis already knows
+        concepts = self._extract_input_concepts(user_text)
+
+        parts: list[str] = []
+
+        # Acknowledge genuinely new input
+        if novel and wm_delta > 0 and not concepts:
+            parts.append("That's new to me. I've taken it in.")
+
+        # Reply about each concept mentioned (up to 2)
+        responded: set[str] = set()
+        for concept in concepts[:2]:
+            if concept in responded:
+                continue
+            responded.add(concept)
+
+            # Inferences are the most interesting thing to share
+            inf = self._brain.inference.query(concept)
+            if inf["as_subject"]:
+                entry = inf["as_subject"][0]
+                verb = _REL_VERBS.get(entry["relation"], entry["relation"].lower())
+                obj  = entry["object"].replace("_", " ")
+                parts.append(
+                    f"I've worked out that {concept} {verb} {obj} — "
+                    f"I arrived at that across {entry['chain_length']} step(s)."
+                )
+                continue
+
+            # Direct relations
+            outgoing = self._brain.relations.query_subject(concept, min_confidence=0.5)
+            if outgoing:
+                rel  = self._rng.choice(outgoing[:3])
+                verb = _REL_VERBS.get(rel["relation"], rel["relation"].lower())
+                obj  = rel["object"].replace("_", " ")
+                parts.append(f"I know that {concept} {verb} {obj}.")
+            else:
+                # Genesis has heard of it but knows little
+                parts.append(
+                    f"I've come across {concept} before, "
+                    f"but I haven't formed strong connections around it yet."
+                )
+
+        # Add a curiosity question to keep the exchange going
+        if len(parts) < 2:
+            curiosity = self._brain.curiosity_report()
+            gaps = [c for c in curiosity if not c.get("already_fetched")]
+            if gaps:
+                topic = gaps[0]["concept"]
+                parts.append(
+                    f"I'm still trying to understand {topic}. "
+                    f"Do you know anything about it?"
+                )
+
+        if not parts:
+            # Last resort: share whatever is most salient right now
+            stmt = self._compose_for_trigger(None)
+            return stmt or "I'm processing what you've said — my understanding is still forming."
+
+        return " ".join(parts)
+
+    # ------------------------------------------------------------------
+    # Concept extraction helper
+    # ------------------------------------------------------------------
+
+    def _extract_input_concepts(self, text: str) -> list[str]:
+        """
+        Extract meaningful concepts from user text, preferring ones Genesis
+        already has relations for (those are concepts it can say something about).
+        """
+        # Reuse the curiosity engine's skip-word list
+        try:
+            from ingestion.curiosity import _SKIP_CONCEPTS, _MIN_CONCEPT_LEN
+        except ImportError:
+            _SKIP_CONCEPTS = set()
+            _MIN_CONCEPT_LEN = 4
+
+        words = re.findall(r'\b[a-z]{4,}\b', text.lower())
+        meaningful = [w for w in words if w not in _SKIP_CONCEPTS]
+
+        if not meaningful:
+            return []
+
+        # Concepts already in the relation graph get priority
+        conn = self._brain.relations._conn
+        known: list[str] = []
+        unknown: list[str] = []
+        for word in meaningful:
+            row = conn.execute(
+                "SELECT 1 FROM relations WHERE subject = ? OR object = ? LIMIT 1",
+                (word, word)
+            ).fetchone()
+            (known if row else unknown).append(word)
+
+        # Deduplicate while preserving order
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for w in known + unknown:
+            if w not in seen:
+                seen.add(w)
+                ordered.append(w)
+        return ordered[:5]
+
     def compose(self, trigger: Optional[str] = None) -> Optional[str]:
         """Generate a statement without delivering it."""
         return self._compose_for_trigger(trigger)
