@@ -16,12 +16,19 @@ throttle = fewer capabilities. Degradation order:
     → memory_store → (text is last resort, never dropped)
 """
 
-import resource
 import sys
 import os
 import time
 from dataclasses import dataclass, field
 from enum import IntEnum
+
+# `resource` is Unix-only. Windows uses time.process_time() + optional psutil.
+try:
+    import resource as _resource_mod
+    _HAS_RESOURCE = True
+except ImportError:
+    _resource_mod = None
+    _HAS_RESOURCE = False
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils.types import ResourceBudget
@@ -150,12 +157,7 @@ class ResourceManager:
         self._last_wall = now
 
         try:
-            usage = resource.getrusage(resource.RUSAGE_SELF)
-            cpu_total = usage.ru_utime + usage.ru_stime
-            cpu_delta_ms = (cpu_total - self._last_cpu_s) * 1000.0
-            self._last_cpu_s = cpu_total
-
-            rss_kb = self._sample_rss(usage)
+            cpu_delta_ms, rss_kb = self._measure()
 
             # Normalize to energy: 1.0 = no pressure, 0.0 = maxed out
             mem_pressure = min(1.0, rss_kb / max(1, self.memory_limit_kb))
@@ -224,8 +226,29 @@ class ResourceManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _sample_rss(self, usage) -> int:
-        """Return RSS in KB. Tries /proc first (Linux), falls back to ru_maxrss."""
+    def _measure(self) -> tuple[float, int]:
+        """
+        Return (cpu_delta_ms, rss_kb) cross-platform.
+
+        Unix: uses resource.getrusage() — precise cumulative CPU + RSS.
+        Windows: uses time.process_time() for CPU; psutil for RSS if
+                 installed, otherwise reports 0 (energy stays high, no pressure).
+        """
+        if _HAS_RESOURCE:
+            usage = _resource_mod.getrusage(_resource_mod.RUSAGE_SELF)
+            cpu_total = usage.ru_utime + usage.ru_stime
+            cpu_delta_ms = (cpu_total - self._last_cpu_s) * 1000.0
+            self._last_cpu_s = cpu_total
+            rss_kb = self._sample_rss_unix(usage)
+        else:
+            cpu_total = time.process_time()
+            cpu_delta_ms = (cpu_total - self._last_cpu_s) * 1000.0
+            self._last_cpu_s = cpu_total
+            rss_kb = self._sample_rss_windows()
+        return cpu_delta_ms, rss_kb
+
+    def _sample_rss_unix(self, usage) -> int:
+        """Return RSS in KB on Unix. Tries /proc first (Linux), falls back to ru_maxrss."""
         if sys.platform == "linux":
             try:
                 with open("/proc/self/status") as f:
@@ -234,14 +257,25 @@ class ResourceManager:
                             return int(line.split()[1])
             except Exception:
                 pass
-            # Linux fallback: ru_maxrss is KB on Linux
-            return usage.ru_maxrss
+            return usage.ru_maxrss  # Linux: KB
         elif sys.platform == "darwin":
-            # macOS: ru_maxrss is bytes
-            return usage.ru_maxrss // 1024
+            return usage.ru_maxrss // 1024  # macOS: bytes
         else:
-            # Best effort
             return usage.ru_maxrss
+
+    def _sample_rss_windows(self) -> int:
+        """
+        Return RSS in KB on Windows.
+
+        Tries psutil (pip install psutil) for accurate measurement.
+        Falls back to 0, which means no memory pressure is reported —
+        the system runs at full capability. Install psutil for real monitoring.
+        """
+        try:
+            import psutil
+            return psutil.Process().memory_info().rss // 1024
+        except Exception:
+            return 0
 
     @staticmethod
     def _energy_to_throttle(energy: float) -> ThrottleLevel:
