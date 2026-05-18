@@ -31,21 +31,49 @@ if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
 
 
-# Words too generic to be useful Wikipedia search terms
+# Words too generic to be useful Wikipedia search terms.
+# Covers: determiners, conjunctions, prepositions, common verbs (all forms),
+# generic nouns, quantifiers, adjectives, and classifier tags that leak
+# from the TextProcessor into relation objects.
 _SKIP_CONCEPTS = {
-    "the", "and", "but", "for", "are", "was", "has", "had", "not",
-    "this", "that", "with", "from", "they", "its", "can", "will",
-    "fact", "neutral", "sentiment", "definition", "observation",
-    "sequence", "pattern", "result", "value", "data", "item",
-    "type", "kind", "form", "way", "thing", "time", "year",
-    "order", "level", "rate", "size", "number", "amount", "after",
-    "only", "then", "fast", "slow", "high", "low", "large", "small",
-    "early", "late", "first", "last", "each", "some", "many", "more",
-    "most", "when", "where", "which", "what", "well", "also", "just",
-    "very", "than", "both", "even", "long", "such", "same", "other",
-    "become", "during", "between", "without", "within", "through",
-    "count", "total", "relative", "versus", "versus", "dominant",
-    "unknown", "multiple", "single", "complex", "simple",
+    # Articles / determiners
+    "the", "this", "that", "these", "those", "another", "other",
+    # Conjunctions / prepositions
+    "and", "but", "for", "nor", "yet", "both", "either", "neither",
+    "with", "from", "into", "onto", "upon", "over", "under", "about",
+    "since", "while", "until", "after", "before", "during", "between",
+    "without", "within", "through", "against", "toward", "below",
+    # Pronouns / pro-forms
+    "they", "them", "their", "its", "his", "her", "our", "your",
+    "ones", "each", "some", "many", "more", "most", "less", "least",
+    "every", "both", "such", "same", "which", "what", "when", "where",
+    # Common auxiliary / modal verbs
+    "are", "was", "were", "has", "have", "had", "been", "being",
+    "will", "would", "could", "should", "shall", "might", "must",
+    "does", "done", "gets", "have", "make", "made", "take", "taken",
+    "give", "given", "seem", "need", "used", "uses", "went", "come",
+    "came", "gone", "seen", "kept", "keep", "call", "find", "show",
+    "lead", "held", "said", "told", "mean", "work", "goes", "puts",
+    # Generic nouns (not Wikipedia-searchable on their own)
+    "fact", "idea", "item", "list", "sets", "part", "case", "area",
+    "role", "term", "form", "kind", "type", "way", "thing", "time",
+    "year", "side", "line", "step", "base", "core", "body", "unit",
+    "mode", "view", "note", "goal", "plan", "name", "word", "page",
+    "link", "text", "data", "rate", "size", "order", "level", "rate",
+    "number", "amount", "total", "count", "value", "result", "output",
+    # Classifier / sentiment tags that leak from TextProcessor
+    "neutral", "sentiment", "definition", "observation", "sequence",
+    "pattern", "concept", "concepts", "subset", "instance", "aspect",
+    "example", "process", "system", "method", "approach", "model",
+    # Adjective noise
+    "not", "can", "will", "also", "just", "very", "well", "only",
+    "then", "than", "even", "long", "high", "low", "fast", "slow",
+    "large", "small", "early", "late", "first", "last", "once",
+    "often", "still", "again", "thus", "like", "next", "various",
+    "certain", "general", "common", "similar", "related", "specific",
+    "multiple", "single", "complex", "simple", "relative", "dominant",
+    "unknown", "major", "minor", "based", "known", "found", "given",
+    "versus",
 }
 
 _MIN_CONCEPT_LEN = 4
@@ -203,7 +231,6 @@ class CuriosityEngine:
 
     def _clean_concept(self, concept: str) -> str:
         """Clean a relation graph concept into a Wikipedia search phrase."""
-        # Replace underscores, normalize whitespace
         clean = concept.replace("_", " ").strip().lower()
         words = clean.split()
         meaningful = [
