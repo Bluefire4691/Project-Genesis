@@ -45,6 +45,27 @@ from memory.relations import RelationGraph
 # Relation types that propagate transitively (same type)
 _TRANSITIVE = frozenset({"CAUSES", "CONTROLS", "REQUIRES", "ENABLES", "IS_A"})
 
+# Cross-type bridge rules: (first_hop, second_hop) → inferred_relation
+# A first_hop B, B second_hop C → A inferred C
+#
+# Semantics:
+#   CONTROLS + CAUSES   → CONTROLS  (A controls B which causes C → A controls C)
+#   CONTROLS + ENABLES  → CONTROLS  (A controls B which enables C → A controls C)
+#   CAUSES   + ENABLES  → CAUSES    (A causes B which enables C → A causes C)
+#   CAUSES   + CONTROLS → AFFECTS   (A causes B which controls C → A affects C)
+#   ENABLES  + REQUIRES → ENABLES   (A enables B which requires C → A enables C)
+#   PREVENTS + CAUSES   → PREVENTS  (A prevents B which causes C → A prevents C)
+#   PREVENTS + ENABLES  → PREVENTS  (A prevents B which enables C → A prevents C)
+_BRIDGE_RULES: list[tuple[str, str, str]] = [
+    ("CONTROLS", "CAUSES",   "CONTROLS"),
+    ("CONTROLS", "ENABLES",  "CONTROLS"),
+    ("CAUSES",   "ENABLES",  "CAUSES"),
+    ("CAUSES",   "CONTROLS", "AFFECTS"),
+    ("ENABLES",  "REQUIRES", "ENABLES"),
+    ("PREVENTS", "CAUSES",   "PREVENTS"),
+    ("PREVENTS", "ENABLES",  "PREVENTS"),
+]
+
 # Confidence multiplier per additional hop beyond the first
 _HOP_DECAY: float = 0.85
 
@@ -116,7 +137,11 @@ class InferenceEngine:
 
     def run(self, session_id: str = "") -> int:
         """
-        Run transitive inference and IS_A property inheritance over all concepts.
+        Run transitive inference, cross-type bridging, and IS_A inheritance.
+
+        Pass 1: same-type transitive chains (CAUSES→CAUSES, CONTROLS→CONTROLS …)
+        Pass 2: cross-type bridging (CONTROLS→CAUSES → CONTROLS, etc.)
+        Pass 3: IS_A property inheritance (cats IS_A mammal → cats inherits mammal props)
 
         Returns the number of new inferences added this call.
         """
@@ -129,6 +154,7 @@ class InferenceEngine:
         before = self._count()
         for concept in concepts:
             self._infer_from(concept, session_id)
+        self._infer_bridges(session_id)
         self._infer_inheritance(session_id)
         return self._count() - before
 
@@ -139,6 +165,7 @@ class InferenceEngine:
         normed = _norm(concept)
         if normed:
             self._infer_from(normed, session_id)
+            self._infer_bridges(session_id, subject_filter=normed)
             self._infer_inheritance(session_id, subject_filter=normed)
         return self.query(normed)
 
@@ -190,6 +217,47 @@ class InferenceEngine:
                                 )
 
                 queue.append((obj, new_steps, new_prod))
+
+    def _infer_bridges(
+        self, session_id: str, subject_filter: Optional[str] = None
+    ) -> None:
+        """
+        Cross-type bridge inference: A type1 B, B type2 C → A result C.
+
+        Uses a single SQL JOIN so the middle concept is matched exactly as stored.
+        This is the primary path to inferences when the knowledge graph is sparse
+        and same-type transitive chains don't yet exist.
+
+        Examples:
+            wolves CONTROLS deer, deer CAUSES overgrazing → wolves CONTROLS overgrazing
+            drought CAUSES fire,  fire  ENABLES erosion   → drought CAUSES erosion
+        """
+        for type1, type2, result_type in _BRIDGE_RULES:
+            filter_clause = "AND r1.subject = ?" if subject_filter else ""
+            params = [type1, type2, _MIN_EDGE_CONF, _MIN_EDGE_CONF]
+            if subject_filter:
+                params.append(subject_filter)
+
+            rows = self._conn.execute(f"""
+                SELECT r1.subject, r1.object, r1.confidence,
+                       r2.object,  r2.confidence
+                FROM relations r1
+                JOIN relations r2 ON LOWER(r1.object) = LOWER(r2.subject)
+                WHERE r1.rel_type = ? AND r2.rel_type = ?
+                  AND r1.confidence >= ? AND r2.confidence >= ?
+                  AND r1.subject != r2.object
+                  {filter_clause}
+                LIMIT 200
+            """, params).fetchall()
+
+            for subj, mid, conf1, obj, conf2 in rows:
+                inferred_conf = conf1 * conf2 * _HOP_DECAY
+                if inferred_conf >= _MIN_CONFIDENCE:
+                    steps = [
+                        (subj, type1,  mid, conf1),
+                        (mid,  type2,  obj, conf2),
+                    ]
+                    self._store(subj, result_type, obj, inferred_conf, steps, session_id)
 
     def _infer_inheritance(
         self, session_id: str, subject_filter: Optional[str] = None

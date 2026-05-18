@@ -318,6 +318,7 @@ def run_interactive(brain):
     print("    learn                — Genesis fetches Wikipedia on its curiosity targets")
     print("    learn:<N>            — fetch N topics (default 3)")
     print("    status               — full system status")
+    print("    relations:all        — show every stored relation")
     print("    relations:<concept>  — what Genesis knows about a concept")
     print("    infer:<concept>      — what Genesis can derive (transitive chains)")
     print("    inferences           — top inferences across all concepts")
@@ -384,11 +385,13 @@ def run_interactive(brain):
         elif user_input.lower() == "status":
             s = brain.full_status()
             print(json.dumps({
-                "cycles": s["cycles"],
-                "stage": s["curriculum"]["current_stage"],
-                "memories": s["memory"]["total_stored"],
-                "observer": s.get("interaction_layer", {}).get("observer", {}).get("state"),
-                "energy": s.get("survival_os", {}).get("resource", {}).get("energy"),
+                "cycles":     s["cycles"],
+                "stage":      s["curriculum"]["current_stage"],
+                "memories":   s["memory"]["total_stored"],
+                "relations":  s.get("relations", {}).get("total_relations", 0),
+                "inferences": s.get("inference", {}).get("total_inferences", 0),
+                "observer":   s.get("interaction_layer", {}).get("observer", {}).get("state"),
+                "energy":     s.get("survival_os", {}).get("resource", {}).get("energy"),
             }, indent=2))
         elif user_input.lower().startswith("infer:"):
             concept = user_input.split(":", 1)[1].strip()
@@ -417,6 +420,18 @@ def run_interactive(brain):
                     print(f"    [{inf['confidence']:.2f}] {inf['subject']} "
                           f"—[{inf['relation']}]→ {inf['object']}  "
                           f"(chain_len={inf['chain_length']})")
+        elif user_input.lower() == "relations:all":
+            conn = brain.relations._conn
+            rows = conn.execute(
+                "SELECT subject, rel_type, object, confidence "
+                "FROM relations ORDER BY confidence DESC"
+            ).fetchall()
+            if not rows:
+                print("  No relations stored yet.")
+            else:
+                print(f"  All {len(rows)} stored relations:")
+                for r in rows:
+                    print(f"    [{r[3]:.2f}] {r[0]}  —[{r[1]}]→  {r[2]}")
         elif user_input.lower().startswith("relations:"):
             concept = user_input.split(":", 1)[1].strip()
             info = brain.relations.query_concept(concept)

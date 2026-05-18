@@ -179,23 +179,26 @@ class TestCompoundConfidence:
 # ------------------------------------------------------------------
 
 class TestNoCrossType:
-    def test_causes_then_controls_not_inferred(self):
-        """CAUSES chain cannot produce CONTROLS inference."""
+    def test_causes_then_controls_no_controls_inferred(self):
+        """CAUSES+CONTROLS produces AFFECTS, never CONTROLS."""
         brain = _brain()
         _add(brain, "a", "CAUSES", "b", 0.9)
         _add(brain, "b", "CONTROLS", "c", 0.9)
         result = brain.infer("a")
-        # Should NOT find 'a CONTROLS c' or 'a CAUSES c'
-        objects = [r["object"] for r in result["as_subject"]]
-        assert "c" not in objects
+        # Bridge rule CAUSES+CONTROLS → AFFECTS, so "c" may appear but only as AFFECTS
+        inferred_relations = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CONTROLS", "c") not in inferred_relations
+        assert ("CAUSES",   "c") not in inferred_relations
 
-    def test_controls_then_causes_not_inferred(self):
+    def test_controls_then_causes_produces_controls(self):
+        """CONTROLS+CAUSES → CONTROLS via bridge rule (the wolves→overgrazing pattern)."""
         brain = _brain()
         _add(brain, "a", "CONTROLS", "b", 0.9)
-        _add(brain, "b", "CAUSES", "c", 0.9)
+        _add(brain, "b", "CAUSES",   "c", 0.9)
         result = brain.infer("a")
-        objects = [r["object"] for r in result["as_subject"]]
-        assert "c" not in objects
+        inferred_relations = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        # Bridge rule: CONTROLS+CAUSES → CONTROLS
+        assert ("CONTROLS", "c") in inferred_relations
 
     def test_prevents_not_transitive(self):
         """PREVENTS is not in TRANSITIVE set — no inference generated."""
@@ -629,3 +632,96 @@ class TestISAInheritance:
                      if r["relation"] == "CONTAINS" and r["object"] == "fur"]
         assert inherited
         assert inherited[0]["chain_length"] == 2
+
+
+# ------------------------------------------------------------------
+# Cross-type Bridge Inference
+# ------------------------------------------------------------------
+
+class TestBridgeInference:
+    """
+    Cross-type bridging: A type1 B, B type2 C → A result C.
+    Covers the most common real-world inference patterns.
+    """
+
+    def test_controls_causes_produces_controls(self):
+        """wolves CONTROLS deer, deer CAUSES overgrazing → wolves CONTROLS overgrazing."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "wolves", "CONTROLS", "deer", conf=0.85)
+        _add(brain, "deer",   "CAUSES",   "overgrazing", conf=0.80)
+        eng.run()
+        result = eng.query("wolves")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CONTROLS", "overgrazing") in subjects
+
+    def test_causes_enables_produces_causes(self):
+        """drought CAUSES fire, fire ENABLES erosion → drought CAUSES erosion."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "drought", "CAUSES",  "fire",    conf=0.85)
+        _add(brain, "fire",    "ENABLES", "erosion", conf=0.80)
+        eng.run()
+        result = eng.query("drought")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CAUSES", "erosion") in subjects
+
+    def test_prevents_causes_produces_prevents(self):
+        """vaccination PREVENTS infection, infection CAUSES spread → vaccination PREVENTS spread."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "vaccination", "PREVENTS", "infection", conf=0.9)
+        _add(brain, "infection",   "CAUSES",   "spread",    conf=0.85)
+        eng.run()
+        result = eng.query("vaccination")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("PREVENTS", "spread") in subjects
+
+    def test_bridge_confidence_decayed(self):
+        """Bridged inference confidence < both source confidences."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "wolves", "CONTROLS", "deer",        conf=0.9)
+        _add(brain, "deer",   "CAUSES",   "overgrazing", conf=0.9)
+        eng.run()
+        result = eng.query("wolves")
+        bridged = [r for r in result["as_subject"]
+                   if r["relation"] == "CONTROLS" and r["object"] == "overgrazing"]
+        assert bridged
+        assert bridged[0]["confidence"] < 0.9
+
+    def test_no_self_loop_from_bridge(self):
+        """A CONTROLS B, B CAUSES A → no A CONTROLS A self-loop."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "predator", "CONTROLS", "prey",     conf=0.85)
+        _add(brain, "prey",     "CAUSES",   "predator", conf=0.80)
+        eng.run()
+        result = eng.query("predator")
+        loops = [r for r in result["as_subject"]
+                 if r["subject"] == r["object"]]
+        assert not loops
+
+    def test_infer_method_triggers_bridging(self):
+        """brain.infer(concept) triggers bridge inference for that concept."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "wolves", "CONTROLS", "deer",        conf=0.85)
+        _add(brain, "deer",   "CAUSES",   "overgrazing", conf=0.80)
+        eng.infer("wolves")
+        result = eng.query("wolves")
+        subjects = [(r["relation"], r["object"]) for r in result["as_subject"]]
+        assert ("CONTROLS", "overgrazing") in subjects
+
+    def test_bridge_chain_length_is_two(self):
+        """Bridged inference stored with chain_length == 2."""
+        brain = _brain()
+        eng = _engine(brain)
+        _add(brain, "wolves", "CONTROLS", "deer",        conf=0.85)
+        _add(brain, "deer",   "CAUSES",   "overgrazing", conf=0.80)
+        eng.run()
+        result = eng.query("wolves")
+        bridged = [r for r in result["as_subject"]
+                   if r["relation"] == "CONTROLS" and r["object"] == "overgrazing"]
+        assert bridged
+        assert bridged[0]["chain_length"] == 2
