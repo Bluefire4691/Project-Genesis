@@ -316,8 +316,12 @@ def run_chat(brain):
     """
     _header("CONVERSATION")
     print("  Talk to Genesis. It will respond from its own knowledge.")
-    print("  Type 'bye' or press Ctrl+C to return to interactive mode.")
+    print("  Type 'exit', 'bye', or press Ctrl+C to leave chat.")
     print()
+
+    # Suppress cycle-by-cycle processing output during conversation
+    original_verbose = brain.verbose
+    brain.verbose = False
 
     # Show what Genesis wants to open with
     opening = brain.voice.compose(trigger="attention")
@@ -333,12 +337,15 @@ def run_chat(brain):
             break
         if not user_text:
             continue
-        if user_text.lower() in ("bye", "exit", "goodbye", "quit"):
+        if user_text.lower() in ("bye", "exit", "goodbye", "quit", "leave", "back"):
             print("  [returning to interactive mode]")
             break
 
         response = brain.voice.chat_respond(user_text)
         print(f"\n  Genesis: {response}\n")
+
+    # Restore verbose setting
+    brain.verbose = original_verbose
 
 
 def _print_summary(brain):

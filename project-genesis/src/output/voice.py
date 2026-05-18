@@ -184,12 +184,13 @@ class GenesisVoice:
                     f"but I haven't formed strong connections around it yet."
                 )
 
-        # Add a curiosity question to keep the exchange going
+        # Add a curiosity question to keep the exchange going (randomised gap)
         if len(parts) < 2:
             curiosity = self._brain.curiosity_report()
             gaps = [c for c in curiosity if not c.get("already_fetched")]
             if gaps:
-                topic = gaps[0]["concept"]
+                pick = self._rng.choice(gaps[:5])
+                topic = pick["concept"]
                 parts.append(
                     f"I'm still trying to understand {topic}. "
                     f"Do you know anything about it?"
@@ -208,10 +209,12 @@ class GenesisVoice:
 
     def _extract_input_concepts(self, text: str) -> list[str]:
         """
-        Extract meaningful concepts from user text, preferring ones Genesis
-        already has relations for (those are concepts it can say something about).
+        Extract concepts from user text that Genesis already has knowledge about.
+
+        Only returns words that exist in the relation graph as subject or object.
+        Unknown words are ignored — saying "I've come across 'tell' before" when
+        the user typed "tell me about it" is meaningless and confusing.
         """
-        # Reuse the curiosity engine's skip-word list
         try:
             from ingestion.curiosity import _SKIP_CONCEPTS, _MIN_CONCEPT_LEN
         except ImportError:
@@ -224,25 +227,22 @@ class GenesisVoice:
         if not meaningful:
             return []
 
-        # Concepts already in the relation graph get priority
+        # Only surface concepts Genesis actually knows — avoids "I've come across
+        # 'tell' before" when the user typed "tell me about it"
         conn = self._brain.relations._conn
         known: list[str] = []
-        unknown: list[str] = []
+        seen: set[str] = set()
         for word in meaningful:
+            if word in seen:
+                continue
+            seen.add(word)
             row = conn.execute(
                 "SELECT 1 FROM relations WHERE subject = ? OR object = ? LIMIT 1",
                 (word, word)
             ).fetchone()
-            (known if row else unknown).append(word)
-
-        # Deduplicate while preserving order
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for w in known + unknown:
-            if w not in seen:
-                seen.add(w)
-                ordered.append(w)
-        return ordered[:5]
+            if row:
+                known.append(word)
+        return known[:5]
 
     def compose(self, trigger: Optional[str] = None) -> Optional[str]:
         """Generate a statement without delivering it."""
