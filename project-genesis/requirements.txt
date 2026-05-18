@@ -1,0 +1,13 @@
+# Project Genesis — Python dependencies
+#
+# Core: no external dependencies required.
+# Genesis runs on Python stdlib + SQLite (included with Python).
+#
+# Optional — audio output (speakers):
+#   pip install pyttsx3
+#
+# Optional — microphone input:
+#   pip install SpeechRecognition pyaudio
+#
+# Development / testing:
+pytest>=7.0
