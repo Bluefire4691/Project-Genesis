@@ -27,6 +27,8 @@ import sys
 import os
 import json
 import time
+import queue
+import threading
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -217,6 +219,183 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
         print()
 
     return brain
+
+
+# ------------------------------------------------------------------
+# Live mode — Genesis runs continuously, user conversation is an overlay
+# ------------------------------------------------------------------
+
+def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
+    """
+    Live mode: Genesis thinks and learns continuously. The user joins the
+    conversation whenever they want — Genesis responds and keeps running.
+
+    Architecture:
+        A single stdin-reader thread puts lines into a queue.
+        The main thread owns all brain state: it runs cycles, drains the
+        queue between each one, and expresses spontaneous thoughts on a
+        time trigger. No cross-thread brain access — no SQLite issues.
+
+    Commands (prefix with /):
+        /quit  /summary  /books  /curiosity  /inferences  /status  /save
+
+    Anything else is treated as conversation and Genesis responds from
+    its current knowledge while continuing to think in the background.
+    """
+    brain.verbose = False
+
+    # Build the input stream
+    if adaptive and brain.curriculum.current_stage.value >= 4:
+        stream = AdaptiveStream(brain)
+    else:
+        from curriculum.open_stage import DataStream
+        stream = DataStream()
+
+    # Stdin reader — only touches the queue, never the brain
+    input_q: queue.Queue = queue.Queue()
+    stop_evt = threading.Event()
+
+    def _read_stdin():
+        while not stop_evt.is_set():
+            try:
+                line = input()
+                input_q.put(line)
+            except EOFError:
+                stop_evt.set()
+
+    reader = threading.Thread(target=_read_stdin, daemon=True)
+    reader.start()
+
+    # Tuning knobs
+    _FETCH_EVERY   = 50    # curiosity fetch every N cycles
+    _EXPR_MIN_GAP  = 40.0  # seconds between spontaneous expressions (minimum)
+    _EXPR_IDLE_GAP = 90.0  # seconds — always express if this long has passed
+    _CYCLE_SLEEP   = 0.02  # seconds between cycles (≈50 cycles/sec max)
+
+    print()
+    print("  Genesis is running.")
+    print("  Type to talk. Prefix / for commands: /quit /summary /books /curiosity")
+    print()
+
+    cycles     = 0
+    last_fetch = 0
+    last_expr  = time.time()
+    last_wm    = brain.memory.stats()["working_memory"].get("occupied", 0)
+
+    try:
+        while not stop_evt.is_set():
+
+            # ── 1. Drain any user input ─────────────────────────────
+            while not input_q.empty():
+                raw = input_q.get_nowait().strip()
+                if not raw:
+                    continue
+
+                # Slash-commands
+                if raw.startswith("/"):
+                    cmd = raw[1:].lower().split(":")[0]
+                    arg = raw[1:].split(":", 1)[1].strip() if ":" in raw else ""
+
+                    if cmd in ("quit", "exit", "q"):
+                        stop_evt.set()
+                        break
+                    elif cmd == "summary":
+                        print()
+                        _print_summary(brain)
+                    elif cmd == "books":
+                        if hasattr(brain, "_feeder") and brain._feeder:
+                            status = brain._feeder.reading_status()
+                            if status:
+                                print(f"\n  Reading {len(status)} book(s):")
+                                for bid, info in status.items():
+                                    print(f"    Book {bid}: {info['percent_read']}% read")
+                            else:
+                                print("\n  No books opened yet.")
+                        else:
+                            print("\n  Run a curiosity fetch first (/curiosity).")
+                    elif cmd == "curiosity":
+                        report = brain.curiosity_report()
+                        if report:
+                            print(f"\n  Genesis most wants to know about:")
+                            for r in report[:6]:
+                                fetched = " [read]" if r["already_fetched"] else ""
+                                print(f"    [{r['curiosity_score']:.2f}] "
+                                      f"{r['concept']}{fetched}")
+                        else:
+                            print("\n  No curiosity targets yet.")
+                    elif cmd == "inferences":
+                        top = brain.inference.top_inferences(limit=10)
+                        if top:
+                            print(f"\n  Top {len(top)} inferences:")
+                            for inf in top:
+                                print(f"    [{inf['confidence']:.2f}] "
+                                      f"{inf['subject']} → {inf['object']}")
+                        else:
+                            print("\n  No inferences derived yet.")
+                    elif cmd == "status":
+                        s = brain.status()
+                        print(f"\n  cycles={s['cycles']} "
+                              f"relations={s.get('relations', {}).get('total_relations', 0)} "
+                              f"inferences={s.get('inference', {}).get('total_inferences', 0)} "
+                              f"memories={s['memory']['total_stored']}")
+                    elif cmd == "save":
+                        brain.save_session()
+                        print("\n  Session saved.")
+                    elif cmd == "learn":
+                        n = int(arg) if arg.isdigit() else fetch_topics
+                        print(f"\n  Fetching {n} topics...")
+                        brain.fetch_knowledge(n_topics=n, verbose=True)
+                        brain.inference.run(session_id=brain.session_id)
+                        last_fetch = cycles
+                    else:
+                        print(f"\n  Unknown command /{cmd}. "
+                              "Try /quit /summary /books /curiosity /inferences /status /save")
+                    print()
+
+                else:
+                    # Conversation — Genesis responds from its own knowledge
+                    response = brain.voice.chat_respond(raw)
+                    print(f"\n  Genesis: {response}\n")
+                    last_expr = time.time()  # reset expression timer after responding
+
+            if stop_evt.is_set():
+                break
+
+            # ── 2. One brain cycle ──────────────────────────────────
+            item = stream.next()
+            brain.process_input(item["type"], item["data"])
+            cycles += 1
+
+            # ── 3. Periodic curiosity fetch ─────────────────────────
+            if cycles - last_fetch >= _FETCH_EVERY:
+                brain.fetch_knowledge(n_topics=fetch_topics, verbose=False)
+                new_inf = brain.inference.run(session_id=brain.session_id)
+                if new_inf > 0:
+                    print(f"  [Genesis derived {new_inf} new connection(s)]\n")
+                last_fetch = cycles
+
+            # ── 4. Spontaneous expression ───────────────────────────
+            now = time.time()
+            wm_now = brain.memory.stats()["working_memory"].get("occupied", 0)
+            wm_delta = wm_now - last_wm
+            last_wm = wm_now
+
+            time_since = now - last_expr
+            # Express if: enough time has passed AND (something changed OR idle too long)
+            if time_since >= _EXPR_MIN_GAP and (wm_delta > 0 or time_since >= _EXPR_IDLE_GAP):
+                stmt = brain.voice.express(force=time_since >= _EXPR_IDLE_GAP)
+                if stmt:
+                    print(f"  Genesis: {stmt}\n")
+                    last_expr = now
+
+            time.sleep(_CYCLE_SLEEP)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_evt.set()
+        brain.save_session()
+        print("\n  Session saved. Genesis resting.")
 
 
 # ------------------------------------------------------------------
@@ -721,6 +900,7 @@ def main():
     cycles = 100
     verbose = True
     interactive = False
+    live = False
     open_only = False
     resume = False
     adaptive = True
@@ -737,6 +917,8 @@ def main():
         arg = args[i]
         if arg == "--quiet":
             verbose = False
+        elif arg == "--live":
+            live = True
         elif arg == "--interactive":
             interactive = True
         elif arg == "--open-only":
@@ -825,7 +1007,9 @@ def main():
     # Auto-save session after every run
     brain.save_session()
 
-    if interactive:
+    if live:
+        run_live(brain, fetch_topics=fetch_topics, adaptive=adaptive)
+    elif interactive:
         run_interactive(brain)
     elif use_listen:
         run_listen_loop(brain)

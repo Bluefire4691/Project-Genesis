@@ -23,12 +23,11 @@ if errorlevel 1 (
 )
 
 echo  Starting Genesis... resuming previous session.
-echo  Type  chat  to talk to Genesis directly.
-echo  Type  help  for all available commands.
-echo  Type  quit  to exit.
+echo  Genesis will think and learn continuously.
+echo  Type anything to talk. Use /quit to exit.
 echo.
 
-python src/main.py --open-only --resume --interactive --self-directed
+python src/main.py --open-only --resume --live
 
 echo.
 echo  Genesis session ended.
