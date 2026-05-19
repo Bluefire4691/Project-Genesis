@@ -152,12 +152,19 @@ class Orchestrator:
         # M3: interaction tick
         interaction_state = self.interaction.cycle(survival_stats, self.cycle_count)
         if interaction_state["is_paused"]:
-            self._log(
-                f"⏸  Paused — {interaction_state['pause_reason']}. "
-                f"Call orchestrator.interaction.resume() to continue."
-            )
-            return {"status": "paused", "reason": interaction_state["pause_reason"],
-                    "cycle": self.cycle_count}
+            pause_reason = interaction_state.get("pause_reason", "")
+            if "closed_loop" in str(pause_reason):
+                # Attention fixation — not a crash, just a rut. Auto-recover and keep going.
+                self._log("⚠ Attention loop detected — auto-recovering, continuing.")
+                self.interaction.resume(self.cycle_count)
+            else:
+                # True danger (energy collapse, diversity collapse) — hard stop.
+                self._log(
+                    f"⏸  Paused — {pause_reason}. "
+                    f"Call orchestrator.interaction.resume() to continue."
+                )
+                return {"status": "paused", "reason": pause_reason,
+                        "cycle": self.cycle_count}
 
         # Drain any pending stimulus (stagnation injection or human feed)
         pending = self.interaction.next_stimulus()
