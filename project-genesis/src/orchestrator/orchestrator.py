@@ -458,14 +458,14 @@ class Orchestrator:
         """
         if not hasattr(self, "_feeder") or self._feeder is None:
             from ingestion.feeder import KnowledgeFeeder
-            self._feeder = KnowledgeFeeder(self, use_full_article=False)
+            self._feeder = KnowledgeFeeder(self)
         return self._feeder.run(n_topics=n_topics, verbose=verbose)
 
     def curiosity_report(self) -> list[dict]:
         """Show what Genesis is most curious about without fetching anything."""
         if not hasattr(self, "_feeder") or self._feeder is None:
             from ingestion.feeder import KnowledgeFeeder
-            self._feeder = KnowledgeFeeder(self, use_full_article=False)
+            self._feeder = KnowledgeFeeder(self)
         return self._feeder.curiosity_report()
 
     def infer(self, concept: str) -> dict:

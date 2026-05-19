@@ -281,6 +281,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     last_fetch = 0
     last_expr  = time.time()
     last_wm    = brain.memory.stats()["working_memory"].get("occupied", 0)
+    last_stmt  = ""
 
     try:
         while not stop_evt.is_set():
@@ -384,8 +385,12 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
             # Express if: enough time has passed AND (something changed OR idle too long)
             if time_since >= _EXPR_MIN_GAP and (wm_delta > 0 or time_since >= _EXPR_IDLE_GAP):
                 stmt = brain.voice.express(force=time_since >= _EXPR_IDLE_GAP)
-                if stmt:
+                if stmt and stmt != last_stmt:
                     print(f"  Genesis: {stmt}\n")
+                    last_expr = now
+                    last_stmt = stmt
+                elif stmt:
+                    # Same statement again — reset timer but stay quiet
                     last_expr = now
 
             time.sleep(_CYCLE_SLEEP)
