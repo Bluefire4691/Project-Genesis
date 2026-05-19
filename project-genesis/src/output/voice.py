@@ -79,11 +79,13 @@ class GenesisVoice:
         brain: "Orchestrator",
         channel: Optional[OutputChannel] = None,
         expression_rate: float = _DEFAULT_EXPRESSION_RATE,
+        min_interval: float = 25.0,
         seed: Optional[int] = None,
     ):
         self._brain = brain
         self._channel = channel or TextChannel()
         self._expression_rate = expression_rate
+        self._min_interval = min_interval  # hard floor: seconds between any two expressions
         self._rng = random.Random(seed)
 
         self._last_expressed_at: float = 0.0
@@ -99,15 +101,22 @@ class GenesisVoice:
         Produce a spontaneous statement if the internal state warrants it.
 
         trigger: one of 'novel', 'inference', 'contradiction', 'attention', None
-        force: bypass probability check — always produce and deliver a statement
+        force: bypass the time gate and probability check
 
         Returns the statement string if one was produced, None otherwise.
         """
+        now = time.time()
+        if not force and (now - self._last_expressed_at) < self._min_interval:
+            return None
         if not force and self._rng.random() > self._expression_rate:
             return None
 
         statement = self._compose_for_trigger(trigger)
         if not statement:
+            return None
+
+        # Don't repeat the same thing twice in a row
+        if not force and statement == self._last_statement:
             return None
 
         self._deliver(statement)

@@ -336,15 +336,17 @@ class Orchestrator:
         if not self.survival.can("text"):
             return None
 
+        # Priority: meaningful insight first, generic "novel" last.
+        # "novel" produces a canned message and fires on almost everything early on.
         trigger: str | None = None
-        if novel:
-            trigger = "novel"
-        elif new_contradictions > 0:
+        if new_contradictions > 0:
             trigger = "contradiction"
         elif wm_delta > 2:
             trigger = "inference"
         elif wm_delta > 0:
             trigger = "attention"
+        elif novel:
+            trigger = "novel"
 
         return self.voice.express(trigger=trigger)
 

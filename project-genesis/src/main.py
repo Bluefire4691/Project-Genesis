@@ -267,21 +267,23 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     reader.start()
 
     # Tuning knobs
-    _FETCH_EVERY   = 50    # curiosity fetch every N cycles
-    _EXPR_MIN_GAP  = 40.0  # seconds between spontaneous expressions (minimum)
-    _EXPR_IDLE_GAP = 90.0  # seconds — always express if this long has passed
-    _CYCLE_SLEEP   = 0.02  # seconds between cycles (≈50 cycles/sec max)
+    _FETCH_EVERY = 50    # curiosity fetch every N cycles
+    _CYCLE_SLEEP = 0.02  # seconds between cycles (≈50 cycles/sec max)
 
     print()
     print("  Genesis is running.")
     print("  Type to talk. Prefix / for commands: /quit /summary /books /curiosity")
     print()
 
+    # Use a clean prefix in live mode — overrides the default "[Genesis] "
+    brain.voice.set_channel(
+        __import__("output.channel", fromlist=["TextChannel"]).TextChannel(
+            prefix="\n  Genesis: "
+        )
+    )
+
     cycles     = 0
     last_fetch = 0
-    last_expr  = time.time()
-    last_wm    = brain.memory.stats()["working_memory"].get("occupied", 0)
-    last_stmt  = ""
 
     try:
         while not stop_evt.is_set():
@@ -357,7 +359,6 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                     # Conversation — Genesis responds from its own knowledge
                     response = brain.voice.chat_respond(raw)
                     print(f"\n  Genesis: {response}\n")
-                    last_expr = time.time()  # reset expression timer after responding
 
             if stop_evt.is_set():
                 break
@@ -374,24 +375,6 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                 if new_inf > 0:
                     print(f"  [Genesis derived {new_inf} new connection(s)]\n")
                 last_fetch = cycles
-
-            # ── 4. Spontaneous expression ───────────────────────────
-            now = time.time()
-            wm_now = brain.memory.stats()["working_memory"].get("occupied", 0)
-            wm_delta = wm_now - last_wm
-            last_wm = wm_now
-
-            time_since = now - last_expr
-            # Express if: enough time has passed AND (something changed OR idle too long)
-            if time_since >= _EXPR_MIN_GAP and (wm_delta > 0 or time_since >= _EXPR_IDLE_GAP):
-                stmt = brain.voice.express(force=time_since >= _EXPR_IDLE_GAP)
-                if stmt and stmt != last_stmt:
-                    print(f"  Genesis: {stmt}\n")
-                    last_expr = now
-                    last_stmt = stmt
-                elif stmt:
-                    # Same statement again — reset timer but stay quiet
-                    last_expr = now
 
             time.sleep(_CYCLE_SLEEP)
 
