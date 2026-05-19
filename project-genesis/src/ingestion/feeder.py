@@ -150,36 +150,43 @@ class KnowledgeFeeder:
     def _fetch_and_process(self, topic: str, verbose: bool = True) -> dict:
         """Fetch one topic and process all its chunks. Returns per-topic stats."""
         t_start = time.monotonic()
+        all_chunks: list[str] = []
+        sources: list[str] = []
 
+        # Step 1: WordNet — fast, offline, always available for English words.
+        # Gives Genesis a clean base definition to process first.
+        definition = self._wordnet.lookup(topic)
+        if definition:
+            all_chunks.extend(chunk_text(definition, sentences_per_chunk=self._sentences_per_chunk))
+            sources.append("WordNet")
+
+        # Step 2: Wikipedia — broader context, examples, related concepts.
+        # Network-dependent; adds depth on top of the WordNet base.
         if self._use_full_article:
-            title, text = self._fetcher.fetch(topic)
+            wiki_title, wiki_text = self._fetcher.fetch(topic)
         else:
-            title, text = self._fetcher.fetch_summary(topic)
+            wiki_title, wiki_text = self._fetcher.fetch_summary(topic)
 
-        if not text:
-            # Fallback: WordNet dictionary (150k+ English words, works offline)
-            definition = self._wordnet.lookup(topic)
-            if definition:
-                title = topic.title()
-                text = definition
-                if verbose:
-                    print(f"  [Curiosity] ✓ '{title}' → WordNet")
-            else:
-                if verbose:
-                    print(f"  [Curiosity] ✗ Could not fetch '{topic}'")
-                self._failed_topics.add(topic)
-                return {
-                    "topic": topic, "title": "", "success": False,
-                    "chunks_processed": 0, "elapsed_s": 0,
-                }
+        if wiki_text:
+            all_chunks.extend(chunk_text(wiki_text, sentences_per_chunk=self._sentences_per_chunk))
+            sources.append("Wikipedia")
 
-        chunks = chunk_text(text, sentences_per_chunk=self._sentences_per_chunk)
+        if not all_chunks:
+            if verbose:
+                print(f"  [Curiosity] ✗ Could not fetch '{topic}'")
+            self._failed_topics.add(topic)
+            return {
+                "topic": topic, "title": "", "success": False,
+                "chunks_processed": 0, "elapsed_s": 0,
+            }
 
+        title = wiki_title if wiki_text else topic.title()
+        source_label = " + ".join(sources)
         if verbose:
-            print(f"  [Curiosity] ✓ '{title}' → {len(chunks)} chunks")
+            print(f"  [Curiosity] ✓ '{title}' → {source_label} ({len(all_chunks)} chunks)")
 
         processed = 0
-        for chunk in chunks:
+        for chunk in all_chunks:
             try:
                 self._brain.process_input("text", chunk)
                 processed += 1
