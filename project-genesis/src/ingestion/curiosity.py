@@ -130,17 +130,19 @@ class CuriosityEngine:
         Return the top N concepts Genesis is most curious about.
 
         Prefers relation-graph gaps over memory key parsing.
-        Already-fetched topics are excluded.
+        Already-fetched topics are excluded, but the set resets once it
+        grows large so Genesis can revisit concepts with fresh understanding.
         """
+        # Reset fetched set once it grows too large — Genesis learns more
+        # each session and re-reading the same corpus passage produces richer
+        # relations the second time around.
+        if len(self._fetched_topics) > 40:
+            self._fetched_topics = set()
+
         candidates: list[tuple[float, str]] = []
-
-        # Primary: graph gaps — concepts referenced but unexplained
         candidates.extend(self._graph_gap_targets())
-
-        # Secondary: high-attention text memories with low understanding
         candidates.extend(self._memory_text_targets())
 
-        # Deduplicate, preserve highest score per concept
         seen: dict[str, float] = {}
         for score, concept in candidates:
             if concept not in self._fetched_topics:
@@ -187,24 +189,30 @@ class CuriosityEngine:
 
     def _graph_gap_targets(self) -> list[tuple[float, str]]:
         """
-        Find concepts that appear as relation objects but have no
-        outgoing relations of their own.
+        Find concepts that Genesis has heard of more than it can explain.
 
-        These are concepts Genesis has 'heard of' (something causes,
-        controls, or enables them) but cannot explain. Maximum gap
-        between awareness and understanding.
+        Scores each relation-object by incoming_references / max(1, outgoing_relations).
+        A concept mentioned by many things but able to explain little itself is the
+        richest learning target. This ratio stays meaningful even after thousands of
+        cycles — it never saturates to zero the way a pure "zero-outgoing" filter does.
         """
         brain = self._brain
         try:
             conn = brain.memory._long_term.conn
             cur = conn.execute("""
-                SELECT object, COUNT(*) as incoming_count
-                FROM relations
-                WHERE LOWER(object) NOT IN (
-                    SELECT DISTINCT LOWER(subject) FROM relations
-                )
-                GROUP BY object
-                ORDER BY incoming_count DESC
+                WITH
+                  inc AS (
+                    SELECT LOWER(object) AS c, COUNT(*) AS n
+                    FROM relations GROUP BY LOWER(object)
+                  ),
+                  out AS (
+                    SELECT LOWER(subject) AS c, COUNT(*) AS n
+                    FROM relations GROUP BY LOWER(subject)
+                  )
+                SELECT inc.c, inc.n AS incoming, COALESCE(out.n, 0) AS outgoing
+                FROM inc
+                LEFT JOIN out ON inc.c = out.c
+                ORDER BY CAST(inc.n AS REAL) / MAX(1, COALESCE(out.n, 0)) DESC
                 LIMIT 60
             """)
             rows = cur.fetchall()
@@ -212,11 +220,13 @@ class CuriosityEngine:
             return []
 
         scored = []
-        for concept, incoming in rows:
+        for concept, incoming, outgoing in rows:
             clean = self._first_valid_word(concept)
             if not clean or clean in self._fetched_topics:
                 continue
-            scored.append((float(incoming), clean))
+            # Score = how much is referenced relative to how well it's understood
+            score = float(incoming) / max(1, outgoing)
+            scored.append((score, clean))
 
         return scored
 
