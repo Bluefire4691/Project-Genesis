@@ -156,7 +156,7 @@ class Orchestrator:
             if "closed_loop" in str(pause_reason):
                 # Attention fixation — not a crash, just a rut. Auto-recover and keep going.
                 self._log("⚠ Attention loop detected — auto-recovering, continuing.")
-                self.interaction.resume(self.cycle_count)
+                self.interaction.resume()
             else:
                 # True danger (energy collapse, diversity collapse) — hard stop.
                 self._log(

@@ -992,7 +992,11 @@ def main():
         brain.curriculum.current_stage = Stage.OPEN
         print("  Skipping curriculum — starting at OPEN stage.")
 
-    if self_directed:
+    if live:
+        # Live mode takes over immediately — no batch run first.
+        # Genesis enters continuous operation straight away.
+        pass
+    elif self_directed:
         run_self_directed(brain, n_cycles=cycles, fetch_topics=fetch_topics,
                           verbose=verbose, adaptive=adaptive)
     else:
