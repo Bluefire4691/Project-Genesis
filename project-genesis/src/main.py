@@ -410,11 +410,17 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                 targets = [r["concept"] for r in curiosity[:fetch_topics]
                            if not r.get("already_fetched")]
                 if targets:
-                    print(f"\n  → curious about: {', '.join(targets)}")
-                brain.fetch_knowledge(n_topics=fetch_topics, verbose=False)
+                    print(f"\n  → reading about: {', '.join(targets)}")
+                report = brain.fetch_knowledge(n_topics=fetch_topics, verbose=False)
                 new_inf = brain.inference.run(session_id=brain.session_id)
-                if new_inf > 0:
-                    print(f"  → derived {new_inf} new connection(s)\n")
+                rel_added = report.get("relations_added", 0)
+                if rel_added > 0 or new_inf > 0:
+                    parts = []
+                    if rel_added > 0:
+                        parts.append(f"+{rel_added} relations")
+                    if new_inf > 0:
+                        parts.append(f"+{new_inf} inferences")
+                    print(f"  → learned: {', '.join(parts)}\n")
                 last_fetch = cycles
 
             # ── 4. Periodic auto-save ───────────────────────────────
