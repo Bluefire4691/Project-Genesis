@@ -9,5 +9,10 @@
 # Optional — microphone input:
 #   pip install SpeechRecognition pyaudio
 #
+# Knowledge acquisition — WordNet dictionary (150k+ words, works offline):
+#   First run: python -c "import nltk; nltk.download('wordnet'); nltk.download('omw-1.4')"
+#   Or Genesis auto-downloads on first lookup if internet is available.
+nltk>=3.8
+
 # Development / testing:
 pytest>=7.0

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from ingestion.wikipedia import WikipediaFetcher
 from ingestion.chunker import chunk_text
 from ingestion.curiosity import CuriosityEngine
-from ingestion.dictionary import LocalDictionary
+from ingestion.wordnet_dict import WordNetDictionary
 
 if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
@@ -49,7 +49,7 @@ class KnowledgeFeeder:
         self._use_full_article = use_full_article
         self._fetcher = WikipediaFetcher()
         self._curiosity = CuriosityEngine(brain)
-        self._dictionary = LocalDictionary()
+        self._wordnet = WordNetDictionary()
 
         self._total_topics_fetched: int = 0
         self._total_chunks_processed: int = 0
@@ -157,13 +157,13 @@ class KnowledgeFeeder:
             title, text = self._fetcher.fetch_summary(topic)
 
         if not text:
-            # Try local dictionary before giving up
-            definition = self._dictionary.lookup(topic)
+            # Fallback: WordNet dictionary (150k+ English words, works offline)
+            definition = self._wordnet.lookup(topic)
             if definition:
                 title = topic.title()
                 text = definition
                 if verbose:
-                    print(f"  [Curiosity] ✓ '{title}' → local dictionary")
+                    print(f"  [Curiosity] ✓ '{title}' → WordNet")
             else:
                 if verbose:
                     print(f"  [Curiosity] ✗ Could not fetch '{topic}'")
