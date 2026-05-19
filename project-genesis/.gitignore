@@ -10,3 +10,6 @@ build/
 *.db
 *.sqlite
 .DS_Store
+data/corpus_index.pkl
+data/book_cache/
+data/reading_positions.json
