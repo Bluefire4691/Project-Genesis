@@ -30,8 +30,9 @@ from typing import Optional
 _GUTENDEX_API = "https://gutendex.com/books/"
 _CHUNK_CHARS = 4000          # ~650 words per reading session
 _MIN_BOOK_CHARS = 10_000     # ignore tiny texts
-_REQUEST_TIMEOUT = 10
-_RETRY_DELAY = 2
+_REQUEST_TIMEOUT = 5   # per attempt for actual book fetches
+_AVAILABILITY_TIMEOUT = 3  # quick probe — fail fast when offline
+_RETRY_DELAY = 1
 
 _HEADERS = {
     "User-Agent": (
@@ -51,16 +52,17 @@ _FOOTER_RE = re.compile(
 )
 
 
-def _fetch_url(url: str) -> Optional[bytes]:
+def _fetch_url(url: str, timeout: int = _REQUEST_TIMEOUT,
+               retries: int = 2) -> Optional[bytes]:
     """Fetch a URL with retries. Returns raw bytes or None."""
-    for attempt in range(3):
+    for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers=_HEADERS)
-            with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as r:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read()
         except Exception:
-            if attempt < 2:
-                time.sleep(_RETRY_DELAY * (attempt + 1))
+            if attempt < retries - 1:
+                time.sleep(_RETRY_DELAY)
     return None
 
 
@@ -104,8 +106,15 @@ class GutenbergFetcher:
 
         Returns (title, passage_text) or (None, None) if unavailable.
         """
+        # Fast path: skip all network calls if we already know we're offline
+        if self._available is False:
+            return None, None
+
         book = self._find_book(topic)
         if not book:
+            # Mark offline after a failed search so future calls are instant
+            if self._available is None:
+                self._available = False
             return None, None
 
         book_id = str(book["id"])
@@ -126,9 +135,11 @@ class GutenbergFetcher:
 
     @property
     def available(self) -> bool:
-        """Return True if gutendex.com is reachable."""
+        """Return True if gutendex.com is reachable. Cached after first probe."""
         if self._available is None:
-            data = _fetch_url(_GUTENDEX_API + "?search=nature")
+            # Short single-attempt probe — fail fast when offline
+            data = _fetch_url(_GUTENDEX_API + "?search=nature",
+                              timeout=_AVAILABILITY_TIMEOUT, retries=1)
             self._available = data is not None
         return self._available
 

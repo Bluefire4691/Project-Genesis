@@ -273,8 +273,9 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     reader.start()
 
     # Tuning knobs
-    _FETCH_EVERY = 50    # curiosity fetch every N cycles
-    _CYCLE_SLEEP = 0.02  # seconds between cycles (≈50 cycles/sec max)
+    _FETCH_EVERY  = 50    # curiosity fetch every N cycles
+    _STATUS_EVERY = 30    # live status line every N cycles
+    _CYCLE_SLEEP  = 0.02  # seconds between cycles (≈50 cycles/sec max)
 
     print()
     print("  Genesis is running.")
@@ -380,15 +381,33 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
 
             # ── 2. One brain cycle ──────────────────────────────────
             item = stream.next()
-            brain.process_input(item["type"], item["data"])
+            result = brain.process_input(item["type"], item["data"])
             cycles += 1
+
+            # ── status heartbeat: show what Genesis is processing ───
+            if cycles % _STATUS_EVERY == 0:
+                wm = brain.memory.memories
+                focus = "—"
+                if wm:
+                    top_k = max(wm.items(), key=lambda kv: kv[1].relevance)[0]
+                    focus = top_k.split(":", 1)[-1].replace("_", " ")[:32]
+                snippet = item["data"][:55].replace("\n", " ").strip()
+                rel_count = brain.relations.stats().get("total_relations", 0)
+                novel_tag = " ★" if result.get("novel") else ""
+                print(f"  · [{cycles:>5}]{novel_tag} \"{snippet}\"")
+                print(f"           thinking: {focus}  |  relations: {rel_count}")
 
             # ── 3. Periodic curiosity fetch ─────────────────────────
             if cycles - last_fetch >= _FETCH_EVERY:
+                curiosity = brain.curiosity_report()
+                targets = [r["concept"] for r in curiosity[:fetch_topics]
+                           if not r.get("already_fetched")]
+                if targets:
+                    print(f"\n  → curious about: {', '.join(targets)}")
                 brain.fetch_knowledge(n_topics=fetch_topics, verbose=False)
                 new_inf = brain.inference.run(session_id=brain.session_id)
                 if new_inf > 0:
-                    print(f"  [Genesis derived {new_inf} new connection(s)]\n")
+                    print(f"  → derived {new_inf} new connection(s)\n")
                 last_fetch = cycles
 
             # ── 4. Periodic auto-save ───────────────────────────────
