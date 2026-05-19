@@ -46,6 +46,71 @@ from utils.types import Stage
 
 _POOL: list[dict] = [
 
+    # --- Foundational: numbers and basic math ---
+    {"type": "text", "data": "A number is a symbol that represents a quantity. Numbers enable comparison — five is greater than three. Each number is exactly one more than the one before it."},
+    {"type": "text", "data": "Adding combines groups. Three apples plus two apples equals five apples. The total is always more than either group alone."},
+    {"type": "text", "data": "Subtracting removes. Seven stones minus three stones leaves four. What remains depends on what was there and what was taken away."},
+    {"type": "text", "data": "Zero is a number that represents the absence of quantity. Adding zero to a number does not change it. A number multiplied by zero produces zero."},
+    {"type": "text", "data": "Half means one of two equal parts. A fraction represents part of a whole. Fractions enable description of quantities smaller than one."},
+    {"type": "text", "data": "A circle is a shape where all points on its boundary are equally distant from its center. A square contains four equal sides and four equal corners. A triangle contains three sides and three corners."},
+    {"type": "text", "data": "A prime number only divides evenly by one and itself. Two, three, five, and seven are prime. There are infinitely many prime numbers — no largest prime exists."},
+    {"type": "text", "data": "Doubling repeatedly produces exponential growth. One becomes two becomes four becomes eight. After a few doublings, the result dwarfs any fixed addition."},
+    {"type": "numeric", "data": {"label": "counting", "values": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "unit": "count"}},
+    {"type": "numeric", "data": {"label": "doubling", "values": [1, 2, 4, 8, 16, 32, 64, 128, 256, 512], "unit": "exponential"}},
+    {"type": "pattern", "data": {"label": "odd_numbers", "sequence": [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]}},
+    {"type": "pattern", "data": {"label": "squares", "sequence": [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]}},
+
+    # --- Foundational: logic ---
+    {"type": "text", "data": "If all birds have feathers, and a robin is a bird, then a robin has feathers. This form of reasoning is valid regardless of what the words represent."},
+    {"type": "text", "data": "A statement is either true or false. It cannot be both true and false at the same time. This constraint is called the law of non-contradiction."},
+    {"type": "text", "data": "A category groups things that share a property. Knowing something belongs to a category enables inference of properties shared by all members."},
+    {"type": "text", "data": "Evidence supports a conclusion. More evidence makes a conclusion more reliable. Evidence that contradicts a conclusion requires revision of the conclusion or the evidence."},
+    {"type": "text", "data": "Correlation is not causation. Two things can change together without either causing the other. A third factor may cause both."},
+    {"type": "text", "data": "A model that explains everything explains nothing. A useful model rules some things out. If it rules nothing out, it predicts nothing."},
+
+    # --- Foundational: language ---
+    {"type": "text", "data": "A word is a symbol that represents something — an object, an action, a quality. Without shared words, two minds cannot exchange ideas."},
+    {"type": "text", "data": "A noun names a thing. A verb describes an action. A sentence combines a noun and a verb to express a complete thought."},
+    {"type": "text", "data": "Reading turns marks on a surface into meaning. Writing turns meaning into marks. Both depend on a shared code between writer and reader."},
+    {"type": "text", "data": "A word can have more than one meaning. Context determines which meaning applies. Without context, many words are ambiguous."},
+    {"type": "text", "data": "A story has a beginning, a middle, and an end. The beginning sets up a situation. The middle changes it. The end resolves it."},
+
+    # --- Foundational: basic science ---
+    {"type": "text", "data": "Matter is anything that contains mass and occupies space. Matter exists as solid, liquid, or gas depending on temperature. Ice, water, and steam are the same substance in three states."},
+    {"type": "text", "data": "Gravity is a force that causes objects to fall toward Earth. Gravity controls the orbits of planets around the sun. Every object with mass attracts every other object with mass."},
+    {"type": "text", "data": "Heat flows from hot objects to cold objects. A warm hand placed on a cold surface loses heat to the surface. Heat never flows from cold to hot on its own."},
+    {"type": "text", "data": "Plants make food from sunlight, water, and air through photosynthesis. Photosynthesis requires sunlight to operate. Photosynthesis produces oxygen as a byproduct."},
+    {"type": "text", "data": "Animals require food, water, and air to survive. Food provides energy. Oxygen enables cells to release that energy."},
+    {"type": "text", "data": "Water flows downhill. Rivers form where rainfall collects and flows toward lower ground. Rivers carve valleys and deposit soil at their mouths."},
+    {"type": "text", "data": "A seed contains a plant embryo and stored nutrients. A seed requires water and warmth to germinate. A germinated seed grows into a plant that produces more seeds."},
+    {"type": "text", "data": "Day and night happen because Earth rotates. The side facing the sun has day. The side facing away has night. One full rotation takes one day."},
+    {"type": "numeric", "data": {"label": "boiling_point_celsius", "value": 100, "unit": "celsius"}},
+    {"type": "numeric", "data": {"label": "freezing_point_celsius", "value": 0, "unit": "celsius"}},
+    {"type": "pattern", "data": {"label": "day_night_cycle", "sequence": [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1], "unit": "light_1_dark_0"}},
+    {"type": "pattern", "data": {"label": "seasons_sunlight", "sequence": [30, 50, 80, 100, 80, 50, 30, 20, 30, 50], "unit": "relative_sunlight"}},
+
+    # --- Foundational: living things ---
+    {"type": "text", "data": "A dog is an animal. A dog is a mammal — warm-blooded and feeds its young with milk. Dogs hunt by using smell and hearing."},
+    {"type": "text", "data": "A cat is a predator. Cats hunt small animals using sharp claws and teeth. A cat is a mammal."},
+    {"type": "text", "data": "A fish lives in water and breathes through gills. Gills extract oxygen from water the way lungs extract oxygen from air."},
+    {"type": "text", "data": "A tree is a large plant with a woody trunk. Trees produce oxygen. Their roots hold soil in place. Forests contain thousands of species of animals and plants."},
+    {"type": "text", "data": "Living things reproduce — they make more of themselves. Without reproduction, a species disappears when its members die."},
+    {"type": "text", "data": "A cell is the smallest unit of life. All living organisms contain cells. A cell contains DNA, which controls all cellular functions."},
+    {"type": "text", "data": "DNA controls the production of proteins. Proteins carry out all cellular functions. A mutation is a change in the sequence of DNA."},
+
+    # --- Foundational: basic social ---
+    {"type": "text", "data": "Sharing means giving part of what you have to others. When a group shares food equally, everyone gets some. Sharing prevents some having everything while others have nothing."},
+    {"type": "text", "data": "Fairness means treating similar cases the same way. Perceived fairness enables cooperation. Perceived unfairness causes defection."},
+    {"type": "text", "data": "A promise is a commitment to do something. Breaking a promise damages trust. Trust is harder to rebuild than it is to lose."},
+    {"type": "text", "data": "A rule describes what is allowed and what is not. Rules enable many individuals to share space and resources without constant conflict. Rules require enforcement to remain effective."},
+    {"type": "text", "data": "A family is a group that cares for its members. Families share resources and protect each other. Many animals form family groups to raise their young."},
+
+    # --- Foundational: cause and time ---
+    {"type": "text", "data": "Before means earlier. After means later. Events happen in order. Knowing the order of events helps explain how one event led to another."},
+    {"type": "text", "data": "Cause and effect: one thing makes another happen. Rain causes puddles. Puddles enable reflection of light. Following causes and effects explains why things are as they are."},
+    {"type": "text", "data": "Slow change is hard to see moment to moment but clear across years. A child grows imperceptibly each day but is visibly larger each year."},
+    {"type": "numeric", "data": {"label": "child_height_cm", "values": [50, 70, 85, 95, 105, 115, 120, 130, 140, 150], "unit": "cm"}},
+
     # --- Natural systems ---
     {"type": "text", "data": "A forest fire destroys trees but releases seeds that need heat to germinate. The fire makes space for new growth."},
     {"type": "text", "data": "Wolves were removed from Yellowstone. Deer overpopulated. Riverbanks eroded. Reintroducing wolves changed the path of rivers."},

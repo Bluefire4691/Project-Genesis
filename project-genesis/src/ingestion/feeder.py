@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from ingestion.wikipedia import WikipediaFetcher
 from ingestion.chunker import chunk_text
 from ingestion.curiosity import CuriosityEngine
+from ingestion.dictionary import LocalDictionary
 
 if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
@@ -48,11 +49,12 @@ class KnowledgeFeeder:
         self._use_full_article = use_full_article
         self._fetcher = WikipediaFetcher()
         self._curiosity = CuriosityEngine(brain)
+        self._dictionary = LocalDictionary()
 
         self._total_topics_fetched: int = 0
         self._total_chunks_processed: int = 0
         self._total_relations_before: int = 0
-        self._failed_topics: set[str] = set()  # never retry Wikipedia 404s
+        self._failed_topics: set[str] = set()  # never retry topics that failed everywhere
 
     # Maximum topics per run — prevents runaway fetching when graph is sparse.
     # Large requests (learn:200) are silently capped; quality beats quantity.
@@ -155,13 +157,21 @@ class KnowledgeFeeder:
             title, text = self._fetcher.fetch_summary(topic)
 
         if not text:
-            if verbose:
-                print(f"  [Curiosity] ✗ Could not fetch '{topic}'")
-            self._failed_topics.add(topic)  # never retry this topic
-            return {
-                "topic": topic, "title": "", "success": False,
-                "chunks_processed": 0, "elapsed_s": 0,
-            }
+            # Try local dictionary before giving up
+            definition = self._dictionary.lookup(topic)
+            if definition:
+                title = topic.title()
+                text = definition
+                if verbose:
+                    print(f"  [Curiosity] ✓ '{title}' → local dictionary")
+            else:
+                if verbose:
+                    print(f"  [Curiosity] ✗ Could not fetch '{topic}'")
+                self._failed_topics.add(topic)
+                return {
+                    "topic": topic, "title": "", "success": False,
+                    "chunks_processed": 0, "elapsed_s": 0,
+                }
 
         chunks = chunk_text(text, sentences_per_chunk=self._sentences_per_chunk)
 
