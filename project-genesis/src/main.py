@@ -391,7 +391,8 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                 if wm:
                     top_k = max(wm.items(), key=lambda kv: kv[1].relevance)[0]
                     focus = top_k.split(":", 1)[-1].replace("_", " ")[:32]
-                snippet = item["data"][:55].replace("\n", " ").strip()
+                data = item.get("data", "")
+                snippet = (data if isinstance(data, str) else str(data))[:55].replace("\n", " ").strip()
                 rel_count = brain.relations.stats().get("total_relations", 0)
                 novel_tag = " ★" if result.get("novel") else ""
                 print(f"  · [{cycles:>5}]{novel_tag} \"{snippet}\"")
