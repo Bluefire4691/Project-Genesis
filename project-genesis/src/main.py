@@ -225,6 +225,12 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
 # Live mode — Genesis runs continuously, user conversation is an overlay
 # ------------------------------------------------------------------
 
+_LIVE_COMMANDS = {
+    "quit", "exit", "q", "summary", "books", "curiosity",
+    "inferences", "status", "save", "learn",
+}
+
+
 def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     """
     Live mode: Genesis thinks and learns continuously. The user joins the
@@ -236,8 +242,8 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
         queue between each one, and expresses spontaneous thoughts on a
         time trigger. No cross-thread brain access — no SQLite issues.
 
-    Commands (prefix with /):
-        /quit  /summary  /books  /curiosity  /inferences  /status  /save
+    Commands (with or without / prefix):
+        quit  summary  books  curiosity  inferences  status  save  learn
 
     Anything else is treated as conversation and Genesis responds from
     its current knowledge while continuing to think in the background.
@@ -272,7 +278,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
 
     print()
     print("  Genesis is running.")
-    print("  Type to talk. Prefix / for commands: /quit /summary /books /curiosity")
+    print("  Type to talk. Commands: quit  summary  books  curiosity  status  save  learn")
     print()
 
     # Use a clean prefix in live mode — overrides the default "[Genesis] "
@@ -282,8 +288,10 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
         )
     )
 
-    cycles     = 0
-    last_fetch = 0
+    cycles      = 0
+    last_fetch  = 0
+    last_save   = time.time()
+    _AUTOSAVE_INTERVAL = 120.0  # auto-save every 2 minutes
 
     try:
         while not stop_evt.is_set():
@@ -294,10 +302,14 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                 if not raw:
                     continue
 
-                # Slash-commands
-                if raw.startswith("/"):
-                    cmd = raw[1:].lower().split(":")[0]
-                    arg = raw[1:].split(":", 1)[1].strip() if ":" in raw else ""
+                # Commands: accept with or without / prefix
+                raw_body = raw[1:] if raw.startswith("/") else raw
+                cmd_word = raw_body.lower().split(":")[0]
+                is_command = raw.startswith("/") or cmd_word in _LIVE_COMMANDS
+
+                if is_command:
+                    cmd = cmd_word
+                    arg = raw_body.split(":", 1)[1].strip() if ":" in raw_body else ""
 
                     if cmd in ("quit", "exit", "q"):
                         stop_evt.set()
@@ -315,7 +327,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                             else:
                                 print("\n  No books opened yet.")
                         else:
-                            print("\n  Run a curiosity fetch first (/curiosity).")
+                            print("\n  Run 'curiosity' first to see targets, then 'learn'.")
                     elif cmd == "curiosity":
                         report = brain.curiosity_report()
                         if report:
@@ -343,16 +355,19 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                               f"memories={s['memory']['total_stored']}")
                     elif cmd == "save":
                         brain.save_session()
+                        last_save = time.time()
                         print("\n  Session saved.")
                     elif cmd == "learn":
                         n = int(arg) if arg.isdigit() else fetch_topics
                         print(f"\n  Fetching {n} topics...")
                         brain.fetch_knowledge(n_topics=n, verbose=True)
                         brain.inference.run(session_id=brain.session_id)
+                        brain.save_session()
+                        last_save = time.time()
                         last_fetch = cycles
                     else:
-                        print(f"\n  Unknown command /{cmd}. "
-                              "Try /quit /summary /books /curiosity /inferences /status /save")
+                        print(f"\n  Unknown command '{cmd}'. "
+                              "Try: quit  summary  books  curiosity  inferences  status  save  learn")
                     print()
 
                 else:
@@ -375,6 +390,12 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                 if new_inf > 0:
                     print(f"  [Genesis derived {new_inf} new connection(s)]\n")
                 last_fetch = cycles
+
+            # ── 4. Periodic auto-save ───────────────────────────────
+            now = time.time()
+            if now - last_save >= _AUTOSAVE_INTERVAL:
+                brain.save_session()
+                last_save = now
 
             time.sleep(_CYCLE_SLEEP)
 
