@@ -16,8 +16,12 @@ from books that are already on disk. The Gutenberg fetcher (online) is
 richer; this keeps Genesis learning even when offline.
 """
 
+import pickle
 import re
+from pathlib import Path
 from typing import Optional
+
+_INDEX_CACHE = Path("data/corpus_index.pkl")
 
 # Brown categories most likely to contain useful knowledge for Genesis.
 # Excluded: adventure, fiction, mystery, romance, science_fiction, humor
@@ -118,12 +122,32 @@ class OfflineCorpusFetcher:
         if self._available is not None:
             return self._available
 
+        # Fast path: load pre-built index from disk (subsequent sessions)
+        if _INDEX_CACHE.exists():
+            try:
+                with _INDEX_CACHE.open("rb") as f:
+                    cached = pickle.load(f)
+                self._all_sents = cached["sents"]
+                self._index = cached["index"]
+                # Warm WordNet so keyword expansion is instant
+                try:
+                    from nltk.corpus import wordnet as wn
+                    wn.synsets("animal")
+                except Exception:
+                    pass
+                self._available = True
+                print(f"  [Corpus] Loaded — {len(self._all_sents):,} sentences ready.")
+                return True
+            except Exception:
+                pass  # cache corrupt — fall through and rebuild
+
+        # First run: build the index (one-time cost, ~10s)
         result = _load_corpora()
         if result is None:
             self._available = False
             return False
 
-        print("  [Corpus] Indexing offline texts — one-time setup, ~10s...")
+        print("  [Corpus] Building index — first-time setup, ~10s...")
         gutenberg, brown = result
 
         sents: list = []
@@ -143,14 +167,24 @@ class OfflineCorpusFetcher:
 
         self._all_sents = sents
         self._index = self._build_index(sents)
-        # Warm WordNet now so first find_passages() call is instant
+
+        # Warm WordNet so first find_passages() call is instant
         try:
             from nltk.corpus import wordnet as wn
-            wn.synsets("animal")  # triggers corpus load
+            wn.synsets("animal")
         except Exception:
             pass
+
+        # Save index to disk so next session loads instantly
+        try:
+            _INDEX_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            with _INDEX_CACHE.open("wb") as f:
+                pickle.dump({"sents": self._all_sents, "index": self._index}, f)
+        except Exception:
+            pass
+
         self._available = True
-        print(f"  [Corpus] Ready — {len(sents):,} sentences indexed.")
+        print(f"  [Corpus] Ready — {len(sents):,} sentences indexed and saved.")
         return True
 
     @staticmethod
