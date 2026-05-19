@@ -13,7 +13,7 @@ Primary signal — relation graph gaps:
 Secondary signal — working memory text items:
     High-relevance TEXT memories where the concept has few relations.
     Pattern/numeric memory keys are excluded — they're data labels,
-    not Wikipedia-searchable concepts.
+    not searchable concepts.
 
 Scoring:
     graph targets:  incoming_relation_count  (referenced often = important)
@@ -31,10 +31,7 @@ if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
 
 
-# Words too generic to be useful Wikipedia search terms.
-# Covers: determiners, conjunctions, prepositions, common verbs (all forms),
-# generic nouns, quantifiers, adjectives, and classifier tags that leak
-# from the TextProcessor into relation objects.
+# Words too generic to be useful search terms.
 _SKIP_CONCEPTS = {
     # Articles / determiners
     "the", "this", "that", "these", "those", "another", "other",
@@ -50,17 +47,19 @@ _SKIP_CONCEPTS = {
     # Common auxiliary / modal verbs
     "are", "was", "were", "has", "have", "had", "been", "being",
     "will", "would", "could", "should", "shall", "might", "must",
-    "does", "done", "gets", "have", "make", "made", "take", "taken",
+    "does", "done", "gets", "make", "made", "take", "taken",
     "give", "given", "seem", "need", "used", "uses", "went", "come",
     "came", "gone", "seen", "kept", "keep", "call", "find", "show",
     "lead", "held", "said", "told", "mean", "work", "goes", "puts",
-    # Generic nouns (not Wikipedia-searchable on their own)
+    # Generic nouns (not searchable on their own)
     "fact", "idea", "item", "list", "sets", "part", "case", "area",
     "role", "term", "form", "kind", "type", "way", "thing", "time",
     "year", "side", "line", "step", "base", "core", "body", "unit",
     "mode", "view", "note", "goal", "plan", "name", "word", "page",
-    "link", "text", "data", "rate", "size", "order", "level", "rate",
+    "link", "text", "data", "rate", "size", "order", "level",
     "number", "amount", "total", "count", "value", "result", "output",
+    "change", "changes", "growth", "loss", "increase", "decrease",
+    "average", "range", "scale", "measure", "degree",
     # Classifier / sentiment tags that leak from TextProcessor
     "neutral", "sentiment", "definition", "observation", "sequence",
     "pattern", "concept", "concepts", "subset", "instance", "aspect",
@@ -73,10 +72,42 @@ _SKIP_CONCEPTS = {
     "certain", "general", "common", "similar", "related", "specific",
     "multiple", "single", "complex", "simple", "relative", "dominant",
     "unknown", "major", "minor", "based", "known", "found", "given",
-    "versus",
+    "versus", "across", "within",
 }
 
 _MIN_CONCEPT_LEN = 4
+
+# WordNet lookup is cached for the session to avoid repeated imports
+_wordnet_cache: dict[str, bool] = {}
+_wordnet_available: bool | None = None
+
+
+def _is_real_word(word: str) -> bool:
+    """
+    Return True if the word exists in WordNet.
+
+    Filters out noise n-grams like 'searobber', 'adjusters', proper-noun
+    fragments, and OCR artefacts that appear in memory keys but are not
+    meaningful search topics.
+    """
+    global _wordnet_available
+    if word in _wordnet_cache:
+        return _wordnet_cache[word]
+
+    if _wordnet_available is False:
+        # WordNet unavailable — accept any word long enough
+        return len(word) >= 5
+
+    try:
+        from nltk.corpus import wordnet
+        _wordnet_available = True
+        result = bool(wordnet.synsets(word))
+    except Exception:
+        _wordnet_available = False
+        result = len(word) >= 5
+
+    _wordnet_cache[word] = result
+    return result
 
 
 class CuriosityEngine:
@@ -131,6 +162,8 @@ class CuriosityEngine:
                 "source": "graph_gap",
                 "curiosity_score": round(score, 3),
                 "already_fetched": concept in self._fetched_topics,
+                "attention": 0.0,
+                "relations_known": 0,
             }
 
         for score, concept in self._memory_text_targets():
@@ -140,6 +173,8 @@ class CuriosityEngine:
                     "source": "memory",
                     "curiosity_score": round(score, 3),
                     "already_fetched": concept in self._fetched_topics,
+                    "attention": 0.0,
+                    "relations_known": 0,
                 }
 
         report = sorted(candidates.values(),
@@ -170,7 +205,7 @@ class CuriosityEngine:
                 )
                 GROUP BY object
                 ORDER BY incoming_count DESC
-                LIMIT 40
+                LIMIT 60
             """)
             rows = cur.fetchall()
         except Exception:
@@ -178,10 +213,9 @@ class CuriosityEngine:
 
         scored = []
         for concept, incoming in rows:
-            clean = self._clean_concept(concept)
+            clean = self._first_valid_word(concept)
             if not clean or clean in self._fetched_topics:
                 continue
-            # Score: how often is this concept referenced without explanation
             scored.append((float(incoming), clean))
 
         return scored
@@ -193,7 +227,8 @@ class CuriosityEngine:
     def _memory_text_targets(self) -> list[tuple[float, str]]:
         """
         High-attention text memories where the concept has few relations.
-        Explicitly excludes pattern: and num: keys — those are data labels.
+        Only text: keys — pattern/numeric keys are data labels.
+        Only single real words — multi-word memory keys are noisy n-grams.
         """
         brain = self._brain
         wm = brain.memory.memories
@@ -205,12 +240,11 @@ class CuriosityEngine:
 
         sorted_wm = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)
 
-        for key, mem in sorted_wm[:50]:
-            # Only use text memories — pattern/numeric keys are data labels
+        for key, mem in sorted_wm[:60]:
             if not key.startswith("text:"):
                 continue
 
-            concept = self._key_to_concept(key)
+            concept = self._key_to_single_word(key)
             if not concept or concept in seen or concept in self._fetched_topics:
                 continue
             seen.add(concept)
@@ -229,22 +263,28 @@ class CuriosityEngine:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _clean_concept(self, concept: str) -> str:
-        """Clean a relation graph concept into a Wikipedia search phrase."""
+    def _first_valid_word(self, concept: str) -> str:
+        """
+        Extract the first meaningful, real word from a concept string.
+
+        Returns a single word that is:
+          - Long enough (_MIN_CONCEPT_LEN)
+          - Not in the skip list
+          - Present in WordNet (real word, not noise/artefact)
+
+        Always returns a single word or empty string — never a phrase.
+        Multi-word phrases from memory keys are too noisy to be reliable
+        search targets for the corpus/WordNet pipeline.
+        """
         clean = concept.replace("_", " ").strip().lower()
-        words = clean.split()
-        meaningful = [
-            w for w in words
-            if len(w) >= _MIN_CONCEPT_LEN and w not in _SKIP_CONCEPTS
-        ]
-        if not meaningful:
-            return ""
-        result = " ".join(meaningful[:3])
-        return result if len(result) >= _MIN_CONCEPT_LEN else ""
+        for word in clean.split():
+            if (len(word) >= _MIN_CONCEPT_LEN
+                    and word not in _SKIP_CONCEPTS
+                    and _is_real_word(word)):
+                return word
+        return ""
 
-    def _key_to_concept(self, key: str) -> str:
-        """Extract a Wikipedia-searchable phrase from a text: memory key."""
-        # Strip 'text:' prefix
+    def _key_to_single_word(self, key: str) -> str:
+        """Extract a single valid word from a text: memory key."""
         raw = re.sub(r"^text:", "", key)
-        return self._clean_concept(raw)
-
+        return self._first_valid_word(raw)

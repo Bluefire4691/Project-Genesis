@@ -385,6 +385,9 @@ class GenesisVoice:
 
     def _compose_novel(self) -> Optional[str]:
         """Express encounter with something genuinely unfamiliar."""
+        # Once Genesis has real knowledge, fall through to more informative types
+        if self._brain.relations.most_connected(limit=1):
+            return None
         return (
             "I have just processed something I have not encountered before. "
             "I don't yet know what to make of it."
