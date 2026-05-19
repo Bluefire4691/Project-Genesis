@@ -4,28 +4,30 @@ Knowledge Feeder — Ingestion Pipeline.
 Coordinates the full self-directed knowledge acquisition loop:
 
     1. CuriosityEngine identifies what Genesis most needs to learn
-    2. WikipediaFetcher retrieves the article text
-    3. TextChunker splits it into processor-ready segments
-    4. Each chunk is processed through brain.process_input()
-    5. New relations accumulate in the RelationGraph
+    2. WordNet provides the base definition of the concept (always, offline)
+    3. GutenbergFetcher finds a relevant book and reads the next passage
+       — Genesis tracks where it left off and continues next session
+    4. OfflineCorpusFetcher searches the NLTK corpus when Gutenberg is offline
+    5. Each text chunk is processed through brain.process_input()
+    6. New relations accumulate in the RelationGraph
 
-This is the concrete implementation of M17 (Active Curiosity):
-Genesis's unresolved concepts become knowledge-seeking behavior,
-not just statements.
+Sources in priority order:
+    WordNet      — word definitions, always available offline
+    Gutenberg    — complete public domain books, requires network
+    NLTK corpus  — Brown + Gutenberg corpora already on disk, offline fallback
 
-Usage:
-    feeder = KnowledgeFeeder(brain)
-    report = feeder.run(n_topics=3)
-    print(report)  # what was learned
+Genesis reads books, not encyclopedia stubs. The same book is returned to
+across multiple sessions — understanding builds the way a reader's does.
 """
 
 import time
 from typing import TYPE_CHECKING
 
-from ingestion.wikipedia import WikipediaFetcher
 from ingestion.chunker import chunk_text
 from ingestion.curiosity import CuriosityEngine
 from ingestion.wordnet_dict import WordNetDictionary
+from ingestion.gutenberg import GutenbergFetcher
+from ingestion.corpus import OfflineCorpusFetcher
 
 if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
@@ -35,49 +37,36 @@ class KnowledgeFeeder:
     """
     Self-directed knowledge acquisition for Genesis.
 
-    Genesis decides what to learn. The feeder goes and gets it.
+    Genesis decides what to learn. The feeder finds the right source and
+    reads it — returning to the same books across sessions.
     """
 
     def __init__(
         self,
         brain: "Orchestrator",
         sentences_per_chunk: int = 3,
-        use_full_article: bool = False,
     ):
         self._brain = brain
         self._sentences_per_chunk = sentences_per_chunk
-        self._use_full_article = use_full_article
-        self._fetcher = WikipediaFetcher()
         self._curiosity = CuriosityEngine(brain)
         self._wordnet = WordNetDictionary()
+        self._gutenberg = GutenbergFetcher()
+        self._corpus = OfflineCorpusFetcher()
 
         self._total_topics_fetched: int = 0
         self._total_chunks_processed: int = 0
-        self._total_relations_before: int = 0
-        self._failed_topics: set[str] = set()  # never retry topics that failed everywhere
+        self._failed_topics: set[str] = set()
 
-    # Maximum topics per run — prevents runaway fetching when graph is sparse.
-    # Large requests (learn:200) are silently capped; quality beats quantity.
     _MAX_TOPICS_PER_RUN = 10
 
     def run(self, n_topics: int = 5, verbose: bool = True) -> dict:
         """
         Run one curiosity-driven knowledge acquisition cycle.
 
-        Genesis identifies its top N curiosity targets, fetches
-        Wikipedia articles for each, and processes all chunks.
-
-        n_topics is capped at _MAX_TOPICS_PER_RUN. Use the self-directed
-        loop (--self-directed) to process many topics across multiple cycles
-        with knowledge integration between each batch.
-
         Returns a report of what was learned.
         """
-        brain = self._brain
         n_topics = min(n_topics, self._MAX_TOPICS_PER_RUN)
 
-        # What does Genesis want to know about?
-        # Exclude previously failed topics so Wikipedia 404s are never retried.
         topics = [
             t for t in self._curiosity.top_topics(n=n_topics)
             if t not in self._failed_topics
@@ -94,7 +83,7 @@ class KnowledgeFeeder:
                 "note": "No curiosity targets found — process more input first.",
             }
 
-        relations_before = brain.relations.stats().get("total_relations", 0)
+        relations_before = self._brain.relations.stats().get("total_relations", 0)
         results = []
 
         if verbose:
@@ -108,13 +97,18 @@ class KnowledgeFeeder:
             results.append(result)
             self._total_topics_fetched += 1
 
-        relations_after = brain.relations.stats().get("total_relations", 0)
+        relations_after = self._brain.relations.stats().get("total_relations", 0)
         chunks_total = sum(r["chunks_processed"] for r in results)
         self._total_chunks_processed += chunks_total
-
         succeeded = [r["topic"] for r in results if r["success"]]
 
-        report = {
+        if verbose:
+            print(f"\n  [Curiosity] Learned from {len(succeeded)}/{len(topics)} topics.")
+            print(f"  Relations: {relations_before} → {relations_after} "
+                  f"(+{relations_after - relations_before})")
+            print()
+
+        return {
             "topics_attempted": topics,
             "topics_succeeded": succeeded,
             "chunks_processed": chunks_total,
@@ -124,23 +118,20 @@ class KnowledgeFeeder:
             "per_topic": results,
         }
 
-        if verbose:
-            print(f"\n  [Curiosity] Learned from {len(succeeded)}/{len(topics)} topics.")
-            print(f"  Relations: {relations_before} → {relations_after} "
-                  f"(+{relations_after - relations_before})")
-            print()
-
-        return report
-
     def curiosity_report(self) -> list[dict]:
         """Show what Genesis is most curious about without fetching."""
         return self._curiosity.curiosity_report()
+
+    def reading_status(self) -> dict:
+        """Report Genesis's reading progress through Gutenberg books."""
+        return self._gutenberg.reading_status()
 
     def stats(self) -> dict:
         return {
             "total_topics_fetched":   self._total_topics_fetched,
             "total_chunks_processed": self._total_chunks_processed,
-            "fetcher":                self._fetcher.stats(),
+            "gutenberg_online":       self._gutenberg.available,
+            "corpus_available":       self._corpus.available,
         }
 
     # ------------------------------------------------------------------
@@ -148,42 +139,52 @@ class KnowledgeFeeder:
     # ------------------------------------------------------------------
 
     def _fetch_and_process(self, topic: str, verbose: bool = True) -> dict:
-        """Fetch one topic and process all its chunks. Returns per-topic stats."""
+        """Gather text about a topic from all available sources and process it."""
         t_start = time.monotonic()
         all_chunks: list[str] = []
         sources: list[str] = []
+        title = topic.title()
 
-        # Step 1: WordNet — fast, offline, always available for English words.
-        # Gives Genesis a clean base definition to process first.
+        # --- WordNet: base definition, always available ---
         definition = self._wordnet.lookup(topic)
         if definition:
-            all_chunks.extend(chunk_text(definition, sentences_per_chunk=self._sentences_per_chunk))
+            all_chunks.extend(
+                chunk_text(definition, sentences_per_chunk=self._sentences_per_chunk)
+            )
             sources.append("WordNet")
 
-        # Step 2: Wikipedia — broader context, examples, related concepts.
-        # Network-dependent; adds depth on top of the WordNet base.
-        if self._use_full_article:
-            wiki_title, wiki_text = self._fetcher.fetch(topic)
-        else:
-            wiki_title, wiki_text = self._fetcher.fetch_summary(topic)
+        # --- Gutenberg: read the next passage from a relevant book ---
+        book_title, passage = self._gutenberg.fetch_for_topic(topic)
+        if passage:
+            all_chunks.extend(
+                chunk_text(passage, sentences_per_chunk=self._sentences_per_chunk)
+            )
+            sources.append(f"Gutenberg: {book_title}")
+            title = book_title or title
 
-        if wiki_text:
-            all_chunks.extend(chunk_text(wiki_text, sentences_per_chunk=self._sentences_per_chunk))
-            sources.append("Wikipedia")
+        # --- Offline corpus: NLTK texts when Gutenberg is unreachable ---
+        elif self._corpus.available:
+            corpus_passage = self._corpus.find_passages(topic)
+            if corpus_passage:
+                all_chunks.extend(
+                    chunk_text(corpus_passage,
+                               sentences_per_chunk=self._sentences_per_chunk)
+                )
+                sources.append("NLTK corpus")
 
         if not all_chunks:
             if verbose:
-                print(f"  [Curiosity] ✗ Could not fetch '{topic}'")
+                print(f"  [Curiosity] ✗ No sources found for '{topic}'")
             self._failed_topics.add(topic)
             return {
                 "topic": topic, "title": "", "success": False,
                 "chunks_processed": 0, "elapsed_s": 0,
             }
 
-        title = wiki_title if wiki_text else topic.title()
         source_label = " + ".join(sources)
         if verbose:
-            print(f"  [Curiosity] ✓ '{title}' → {source_label} ({len(all_chunks)} chunks)")
+            print(f"  [Curiosity] ✓ '{title}' → {source_label} "
+                  f"({len(all_chunks)} chunks)")
 
         processed = 0
         for chunk in all_chunks:
