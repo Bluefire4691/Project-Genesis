@@ -41,38 +41,41 @@ def _load_corpora() -> Optional[tuple]:
     """Load NLTK corpora, downloading if needed. Returns (gutenberg, brown) or None."""
     try:
         import nltk
+        # punkt_tab is needed for gutenberg.sents() — auto-download silently
+        try:
+            from nltk.tokenize import PunktTokenizer  # noqa: F401
+        except Exception:
+            nltk.download("punkt_tab", quiet=True)
+
+        nltk.download("gutenberg", quiet=True)
+        nltk.download("brown", quiet=True)
         from nltk.corpus import gutenberg, brown
-        # Trigger load to check if downloaded
         gutenberg.fileids()
         brown.fileids()
         return gutenberg, brown
-    except LookupError:
-        try:
-            import nltk
-            nltk.download("gutenberg", quiet=True)
-            nltk.download("brown", quiet=True)
-            from nltk.corpus import gutenberg, brown
-            return gutenberg, brown
-        except Exception:
-            return None
     except Exception:
         return None
+
+
+_keyword_cache: dict[str, set[str]] = {}
 
 
 def _topic_keywords(topic: str) -> set[str]:
     """
     Expand a topic into a set of keywords for corpus search.
 
-    Includes the topic words themselves plus any WordNet synonyms/hypernyms
-    to widen the search without hardcoding mappings.
+    Includes the topic words themselves plus any WordNet synonyms/hypernyms.
+    Results are cached — WordNet's first call is slow (~2s cold start); all
+    subsequent lookups for the same word return instantly.
     """
+    if topic in _keyword_cache:
+        return _keyword_cache[topic]
+
     words = set(re.findall(r'[a-z]{3,}', topic.lower()))
-    # Remove very common words that would match everything
     noise = {"the", "and", "for", "with", "that", "this", "from", "are",
              "was", "were", "has", "have", "had", "its", "not", "but"}
     words -= noise
 
-    # Try to expand with WordNet synonyms
     try:
         from nltk.corpus import wordnet as wn
         expanded = set(words)
@@ -83,9 +86,12 @@ def _topic_keywords(topic: str) -> set[str]:
                 for hyp in synset.hypernyms()[:1]:
                     for lemma in hyp.lemmas()[:2]:
                         expanded.add(lemma.name().replace("_", " ").lower())
-        return expanded
+        result = expanded
     except Exception:
-        return words
+        result = words
+
+    _keyword_cache[topic] = result
+    return result
 
 
 def _score_sentence(sentence_words: list[str], keywords: set[str]) -> int:
@@ -117,6 +123,7 @@ class OfflineCorpusFetcher:
             self._available = False
             return False
 
+        print("  [Corpus] Indexing offline texts — one-time setup, ~10s...")
         gutenberg, brown = result
 
         sents: list = []
@@ -136,7 +143,14 @@ class OfflineCorpusFetcher:
 
         self._all_sents = sents
         self._index = self._build_index(sents)
+        # Warm WordNet now so first find_passages() call is instant
+        try:
+            from nltk.corpus import wordnet as wn
+            wn.synsets("animal")  # triggers corpus load
+        except Exception:
+            pass
         self._available = True
+        print(f"  [Corpus] Ready — {len(sents):,} sentences indexed.")
         return True
 
     @staticmethod
@@ -169,11 +183,22 @@ class OfflineCorpusFetcher:
         if not keywords:
             return None
 
-        # Gather candidate sentence indices (any sentence with ≥1 keyword)
+        # Prioritise the topic word itself, then expand with synonyms.
+        # Cap hits per keyword so very common synonym expansions (e.g. "force"
+        # from gravity → gravitation → attraction → force) don't flood candidates.
+        _MAX_HITS_PER_KW = 300
+        topic_words = set(re.findall(r'[a-z]{3,}', topic.lower()))
         candidate_ids: set[int] = set()
-        for kw in keywords:
+
+        # Topic words first (exact match, higher priority)
+        for kw in topic_words:
             if kw in self._index:
-                candidate_ids.update(self._index[kw])
+                candidate_ids.update(self._index[kw][:_MAX_HITS_PER_KW])
+
+        # Synonym expansions (capped to avoid common-word flood)
+        for kw in keywords - topic_words:
+            if kw in self._index:
+                candidate_ids.update(self._index[kw][:100])
 
         if not candidate_ids:
             return None
