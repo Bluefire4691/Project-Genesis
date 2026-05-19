@@ -268,6 +268,8 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                 input_q.put(line)
             except EOFError:
                 stop_evt.set()
+            except Exception:
+                pass  # OSError, KeyboardInterrupt, etc — keep reading
 
     reader = threading.Thread(target=_read_stdin, daemon=True)
     reader.start()
@@ -289,9 +291,10 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
         )
     )
 
-    cycles      = 0
-    last_fetch  = 0
-    last_save   = time.time()
+    cycles        = 0
+    last_fetch    = 0
+    last_save     = time.time()
+    current_topic = "—"   # tracks what Genesis is currently reading about
     _AUTOSAVE_INTERVAL = 120.0  # auto-save every 2 minutes
 
     try:
@@ -353,82 +356,87 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                         print(f"\n  cycles={s['cycles']} "
                               f"relations={s.get('relations', {}).get('total_relations', 0)} "
                               f"inferences={s.get('inference', {}).get('total_inferences', 0)} "
-                              f"memories={s['memory']['total_stored']}")
+                              f"memories={s['memory']['total_stored']}", flush=True)
                     elif cmd == "save":
                         brain.save_session()
                         last_save = time.time()
                         print("\n  Session saved.")
                     elif cmd == "learn":
                         n = int(arg) if arg.isdigit() else fetch_topics
-                        print(f"\n  Fetching {n} topics...")
-                        brain.fetch_knowledge(n_topics=n, verbose=True)
-                        brain.inference.run(session_id=brain.session_id)
+                        print(f"\n  Fetching {n} topics...", flush=True)
+                        try:
+                            brain.fetch_knowledge(n_topics=n, verbose=True)
+                            brain.inference.run(session_id=brain.session_id)
+                        except Exception as e:
+                            print(f"\n  [learn error: {e}]")
                         brain.save_session()
                         last_save = time.time()
                         last_fetch = cycles
                     else:
                         print(f"\n  Unknown command '{cmd}'. "
                               "Try: quit  summary  books  curiosity  inferences  status  save  learn")
-                    print()
+                    print(flush=True)
 
                 else:
                     # Conversation — Genesis responds from its own knowledge
-                    response = brain.voice.chat_respond(raw)
-                    print(f"\n  Genesis: {response}\n")
+                    try:
+                        response = brain.voice.chat_respond(raw)
+                    except Exception:
+                        response = "I'm thinking — ask me again in a moment."
+                    print(f"\n  Genesis: {response}\n", flush=True)
 
             if stop_evt.is_set():
                 break
 
             # ── 2. One brain cycle ──────────────────────────────────
-            item = stream.next()
-            result = brain.process_input(item["type"], item["data"])
+            try:
+                item = stream.next()
+                result = brain.process_input(item["type"], item["data"])
+            except Exception:
+                cycles += 1
+                time.sleep(_CYCLE_SLEEP)
+                continue
             cycles += 1
 
             # ── status heartbeat: show what Genesis is processing ───
             if cycles % _STATUS_EVERY == 0:
-                wm = brain.memory.memories
-                focus = "—"
-                if wm:
-                    sorted_wm = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)
-                    # Prefer text: keys that look like real concepts, not serialised dicts
-                    for k, _ in sorted_wm:
-                        if not k.startswith("text:"):
-                            continue
-                        candidate = k.split(":", 1)[1].replace("_", " ").strip()
-                        # Skip if it looks like a dict or has digits/punctuation from data
-                        if candidate and candidate[0].isalpha() and len(candidate) >= 3:
-                            focus = candidate[:32]
-                            break
                 data = item.get("data", "")
                 snippet = (data if isinstance(data, str) else str(data))[:55].replace("\n", " ").strip()
                 rel_count = brain.relations.stats().get("total_relations", 0)
                 novel_tag = " ★" if result.get("novel") else ""
                 print(f"  · [{cycles:>5}]{novel_tag} \"{snippet}\"")
-                print(f"           thinking: {focus}  |  relations: {rel_count}")
+                print(f"           reading: {current_topic}  |  relations: {rel_count}")
 
             # ── 3. Periodic curiosity fetch ─────────────────────────
             if cycles - last_fetch >= _FETCH_EVERY:
-                curiosity = brain.curiosity_report()
-                targets = [r["concept"] for r in curiosity[:fetch_topics]
-                           if not r.get("already_fetched")]
-                if targets:
-                    print(f"\n  → reading about: {', '.join(targets)}")
-                report = brain.fetch_knowledge(n_topics=fetch_topics, verbose=False)
-                new_inf = brain.inference.run(session_id=brain.session_id)
-                rel_added = report.get("relations_added", 0)
-                if rel_added > 0 or new_inf > 0:
-                    parts = []
-                    if rel_added > 0:
-                        parts.append(f"+{rel_added} relations")
-                    if new_inf > 0:
-                        parts.append(f"+{new_inf} inferences")
-                    print(f"  → learned: {', '.join(parts)}\n")
+                try:
+                    curiosity = brain.curiosity_report()
+                    targets = [r["concept"] for r in curiosity[:fetch_topics]
+                               if not r.get("already_fetched")]
+                    if targets:
+                        current_topic = targets[0]
+                        print(f"\n  → reading about: {', '.join(targets)}")
+                    report = brain.fetch_knowledge(n_topics=fetch_topics, verbose=False)
+                    new_inf = brain.inference.run(session_id=brain.session_id)
+                    rel_added = report.get("relations_added", 0)
+                    if rel_added > 0 or new_inf > 0:
+                        parts = []
+                        if rel_added > 0:
+                            parts.append(f"+{rel_added} relations")
+                        if new_inf > 0:
+                            parts.append(f"+{new_inf} inferences")
+                        print(f"  → learned: {', '.join(parts)}\n")
+                except Exception as e:
+                    print(f"\n  [fetch error: {e}]\n")
                 last_fetch = cycles
 
             # ── 4. Periodic auto-save ───────────────────────────────
             now = time.time()
             if now - last_save >= _AUTOSAVE_INTERVAL:
-                brain.save_session()
+                try:
+                    brain.save_session()
+                except Exception:
+                    pass
                 last_save = now
 
             time.sleep(_CYCLE_SLEEP)

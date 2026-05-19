@@ -94,7 +94,22 @@ _RELATION_PATTERNS: list[tuple[str, str, float]] = [
     (r"(.+?)\s+(?:increased?|decreased?|reduced?|elevated?)\s+(.+)", "AFFECTS", 0.72),
     (r"(.+?)\s+(?:affected?|affects?|influenced?|influences?)\s+(.+)", "AFFECTS", 0.75),
     # Composition
-    (r"(.+?)\s+(?:contains?|consists? of|comprises?|made of)\s+(.+)", "CONTAINS", 0.80),
+    (r"(.+?)\s+(?:contains?|consists? of|comprises?|made of|made up of)\s+(.+)", "CONTAINS", 0.80),
+    # Involvement / participation (academic prose)
+    (r"(.+?)\s+(?:is involved in|are involved in)\s+(.+)",             "AFFECTS",  0.72),
+    (r"(.+?)\s+(?:plays? (?:a|an) (?:\w+ )?role in)\s+(.+)",          "AFFECTS",  0.70),
+    (r"(.+?)\s+(?:is responsible for|are responsible for)\s+(.+)",     "CAUSES",   0.75),
+    # Usage / purpose
+    (r"(.+?)\s+(?:is used (?:for|to|in|as))\s+(.+)",                  "ENABLES",  0.72),
+    (r"(.+?)\s+(?:provides?|supply|supplies)\s+(.+)",                  "ENABLES",  0.68),
+    # Association
+    (r"(.+?)\s+(?:is associated with|are associated with)\s+(.+)",     "AFFECTS",  0.65),
+    (r"(.+?)\s+(?:is related to|are related to)\s+(.+)",               "AFFECTS",  0.62),
+    # Part-whole
+    (r"(.+?)\s+(?:is part of|are part of)\s+(.+)",                     "IS_A",     0.70),
+    # Destruction / protection
+    (r"(.+?)\s+(?:destroys?|kills?|eliminates?)\s+(.+)",               "CAUSES",   0.80),
+    (r"(.+?)\s+(?:protects?|defends?)\s+(.+)",                         "PREVENTS", 0.72),
 ]
 
 # Modal verbs signal hypothesis
@@ -338,12 +353,11 @@ def _extract_relations(sentence: str) -> tuple[list[dict], list[str]]:
         # Record the trigger word(s)
         for marker in ("caused", "led to", "resulted in", "controls", "prevents",
                        "enables", "requires", "eats", "feeds on", "preys on",
-                       "is a", "is an", "depends on"):
+                       "is a", "is an", "depends on", "involved in", "role in",
+                       "associated with", "responsible for", "is part of"):
             if marker in sent_lower:
                 markers_found.append(marker)
                 break
-
-        break  # one relation per sentence — prefer specificity
 
     return relations, markers_found
 

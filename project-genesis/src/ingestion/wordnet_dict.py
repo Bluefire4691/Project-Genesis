@@ -108,35 +108,68 @@ def _best_synset(wn, word: str):
 
 def _format_definition(word: str, synset) -> str:
     """
-    Build a 2-sentence definition string from a WordNet synset.
+    Build a rich definition string from a WordNet synset.
 
-    Sentence 1: "X is a {definition}." or "X refers to {definition}."
-    Sentence 2: "X is a type of {hypernym}." (if hypernym available)
+    Uses WordNet's structured relations to produce sentences with explicit
+    trigger language that the TextProcessor can extract as typed edges:
+      IS_A   — from hypernyms ("X is a Y")
+      CONTAINS — from part/substance meronyms ("X contains Y")
+      REQUIRES — from verb entailments ("X requires Y")
+      CAUSES   — from verb cause relation ("X causes Y")
     """
     raw_defn = synset.definition().strip().rstrip(".")
-    # Remove parenthetical domain markers like "(biology)" at the start
     raw_defn = re.sub(r"^\([^)]+\)\s*", "", raw_defn)
-    # Remove trailing citation markers like "; --Einstein"
     raw_defn = re.sub(r";\s*--[A-Z].*$", "", raw_defn)
-    # Remove excessive semicolons left by citations
-    raw_defn = raw_defn.rstrip(";").strip()
+    raw_defn = re.sub(r"[\s;]+$", "", raw_defn).strip()
 
     display = word.capitalize()
+    sentences: list[str] = []
 
+    # Sentence 1: core definition
     if raw_defn.lower().startswith(word.lower()):
-        sentence1 = raw_defn.capitalize() + "."
+        sentences.append(raw_defn.capitalize() + ".")
     elif raw_defn[:3].lower() in ("a ", "an "):
-        sentence1 = f"{display} is {raw_defn}."
+        sentences.append(f"{display} is {raw_defn}.")
     else:
-        sentence1 = f"{display} refers to {raw_defn}."
+        sentences.append(f"{display} refers to {raw_defn}.")
 
-    hypernyms = synset.hypernyms()
-    if hypernyms:
-        hyp_name = hypernyms[0].lemmas()[0].name().replace("_", " ")
-        sentence2 = f"{display} is a type of {hyp_name}."
-        return f"{sentence1} {sentence2}"
+    # IS_A from hypernym — plain "is a", not "is a type of" so the regex captures cleanly
+    try:
+        hypernyms = synset.hypernyms()
+        if hypernyms:
+            hyp_name = hypernyms[0].lemmas()[0].name().replace("_", " ")
+            sentences.append(f"{display} is a {hyp_name}.")
+    except Exception:
+        pass
 
-    return sentence1
+    # CONTAINS from part or substance meronyms
+    try:
+        meronyms = synset.part_meronyms() or synset.substance_meronyms()
+        if meronyms:
+            mero_name = meronyms[0].lemmas()[0].name().replace("_", " ")
+            sentences.append(f"{display} contains {mero_name}.")
+    except Exception:
+        pass
+
+    # REQUIRES from verb entailments (e.g. "sleep" entails "rest")
+    try:
+        entailments = synset.entailments()
+        if entailments:
+            ent_name = entailments[0].lemmas()[0].name().replace("_", " ")
+            sentences.append(f"{display} requires {ent_name}.")
+    except Exception:
+        pass
+
+    # CAUSES from verb cause relation (e.g. "kill" causes "die")
+    try:
+        causes = synset.causes()
+        if causes:
+            cause_name = causes[0].lemmas()[0].name().replace("_", " ")
+            sentences.append(f"{display} causes {cause_name}.")
+    except Exception:
+        pass
+
+    return " ".join(sentences[:5])
 
 
 class WordNetDictionary:
