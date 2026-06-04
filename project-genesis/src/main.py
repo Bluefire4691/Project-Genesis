@@ -21,6 +21,8 @@ Usage:
     python src/main.py --listen          # Enter microphone listen loop after run
     python src/main.py --self-directed   # Genesis fetches Wikipedia on its own curiosity targets
     python src/main.py --fetch-topics 5  # How many topics to fetch per curiosity cycle (default 5)
+    python src/main.py --memory-size N   # Working memory capacity (default 5000 items)
+    python src/main.py --memory-limit N  # RSS ceiling in MB (default 6144 = 6 GB)
 """
 
 import sys
@@ -1203,8 +1205,8 @@ def main():
     self_directed = False
     fetch_topics = 5
     snapshot_label = None
-    memory_size = 500
-    memory_limit_mb = 2048   # survival RSS ceiling; must fit the offline corpus
+    memory_size = 5000
+    memory_limit_mb = 6144   # survival RSS ceiling; generous — pressure = selectivity, not starvation
 
     args = sys.argv[1:]
     i = 0

@@ -2,8 +2,8 @@
 Working Memory — Bounded RAM cache with attention window.
 
 Short-term memory: what the system is actively holding in mind right now.
-Fast (O(1) dict lookup), bounded (100 items by default), and alive
-to current context (relevance scores shift with each attention update).
+Fast (O(1) dict lookup), bounded, and alive to current context (relevance
+scores shift with each attention update).
 
 Two things live here:
     WorkingMemory   — the bounded RAM store itself
@@ -16,12 +16,14 @@ to the caller so it can be persisted to long-term storage (store.py).
 Nothing is deleted. Eviction = migration to long-term. The memory lives
 on — it just cools off to disk.
 
-Research note: OpenCog's ECAN uses ~100 items for its attentional focus
-(STI — short-term importance). ACT-R's goal buffer holds exactly one
-chunk; our model is deliberately more generous. SOAR's working memory
-is theoretically unbounded but practically bottlenecked by rule matching.
-100 is a principled starting point — enough to hold a rich context
-without becoming an undifferentiated soup.
+On working memory capacity:
+The original default of 100 items was grounded in human-cognitive research
+(OpenCog's ECAN attentional focus, ACT-R's goal buffer). Genesis is not
+trying to model human cognitive limits — its working memory is bounded to
+create *attention pressure*, not to match neuroscience. At 2000+ items the
+eviction choices become genuinely meaningful: Genesis must decide, based on
+relevance and access heat, what stays active. The O(n) eviction scan remains
+fast (sub-millisecond) at this scale.
 """
 
 import math
@@ -49,10 +51,10 @@ class WorkingMemory:
 
     Access order is tracked via an OrderedDict. Items move to the
     front on each access. Eviction candidate is found by scanning
-    for minimum heat (O(n) but n ≤ 100, so ~microseconds).
+    for minimum heat (O(n), fast even at thousands of items).
     """
 
-    def __init__(self, capacity: int = 100):
+    def __init__(self, capacity: int = 2000):
         self.capacity = capacity
         # OrderedDict preserves insertion/access order (most recent at end)
         self._store: OrderedDict[str, Memory] = OrderedDict()

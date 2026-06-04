@@ -90,7 +90,7 @@ class ResourceManager:
 
     def __init__(
         self,
-        memory_limit_mb: int = 512,
+        memory_limit_mb: int = 6144,
         cpu_budget_ms: float = 100.0,
     ):
         """

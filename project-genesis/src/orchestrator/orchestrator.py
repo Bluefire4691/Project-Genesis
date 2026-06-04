@@ -72,8 +72,8 @@ class Orchestrator:
         survival: SurvivalOS | None = None,
         interaction: InteractionLayer | None = None,
         channel: OutputChannel | None = None,
-        working_capacity: int = 500,
-        memory_limit_mb: int = 2048,
+        working_capacity: int = 5000,
+        memory_limit_mb: int = 6144,
     ):
         self.processors = {
             "text":    TextProcessor(),
@@ -109,14 +109,11 @@ class Orchestrator:
         from consolidation import ConsolidationEngine
         self.consolidation = ConsolidationEngine(self)
 
-        # Memory ceiling must accommodate Genesis's offline library. The NLTK
-        # corpus (Brown + Gutenberg, ~135k sentences) resides in RAM for fast
-        # search and alone pushes RSS to ~550 MB. With the old 512 MB default
-        # the survival layer read that as permanent memory pressure, dropped to
-        # EMERGENCY throttle, and silently switched off memory_store — so the
-        # relation graph froze the instant Genesis opened a book. The ceiling
-        # is raised so the library fits with headroom; genuine runaway growth
-        # (a leak past ~2 GB) still trips the throttle as intended.
+        # The survival RSS ceiling is set generously: Genesis is designed to
+        # accumulate knowledge, and the corpus + working set legitimately grows.
+        # The survival pressure exists to create selectivity of attention, not
+        # to starve knowledge accumulation. Genuine runaway growth past the
+        # ceiling still triggers throttling as intended.
         self.survival: SurvivalOS = (
             survival if survival is not None
             else SurvivalOS(memory_limit_mb=memory_limit_mb)
