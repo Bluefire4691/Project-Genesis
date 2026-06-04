@@ -83,6 +83,7 @@ class AdaptiveStream:
         self._attention_selections: int = 0
         self._random_selections: int = 0
         self._current_attention_terms: list[str] = []
+        self._current_directive_terms: list[str] = []  # M17: elevated-weight targets
 
     # ------------------------------------------------------------------
     # Main interface
@@ -149,13 +150,32 @@ class AdaptiveStream:
             except Exception:
                 pass
 
+            # M17: Active curiosity directives — concepts Genesis is actively
+            # trying to resolve (SOAR impasse → subgoal). Stored separately so
+            # _score_item() can give them elevated weight vs general attention.
+            directive_terms: list[str] = []
+            try:
+                directives = self._brain.curiosity_directives()
+                for concept in directives[:self._brain._MAX_DIRECTIVES]:
+                    for word in re.split(r"[\s_-]+", concept.lower()):
+                        if len(word) >= 4:
+                            terms.add(word)
+                            directive_terms.append(word)
+            except Exception:
+                pass
+
             self._current_attention_terms = list(terms)
+            self._current_directive_terms = directive_terms
         except Exception:
             self._current_attention_terms = []
 
     def _score_item(self, item: dict) -> float:
         """
         Score an item by overlap with current attention terms.
+
+        M17: Directive terms (unresolved concepts Genesis is seeking) receive
+        a 2x weight bonus — items that could resolve a knowledge gap are
+        preferred over items that merely align with general attention.
 
         Returns 0.0..1.0. Higher = more relevant to current attention.
         """
@@ -173,7 +193,15 @@ class AdaptiveStream:
 
         attention_set = set(self._current_attention_terms)
         overlap = len(attention_set & item_words)
-        return min(1.0, overlap * 0.15)
+        base_score = overlap * 0.15
+
+        # M17: bonus for items touching unresolved curiosity directives
+        if self._current_directive_terms:
+            directive_set = set(self._current_directive_terms)
+            directive_overlap = len(directive_set & item_words)
+            base_score += directive_overlap * 0.15  # 2x total for directive overlap
+
+        return min(1.0, base_score)
 
     def _attention_weighted_select(self) -> dict:
         """

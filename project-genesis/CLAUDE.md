@@ -148,6 +148,8 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | — | ✅ | Interest history: `history` command shows evolution of salient concepts across all reflections |
 | M15 | ✅ | Prediction error salience: archive significance driven by belief-model surprise (Friston-grounded), not heuristic wm_delta |
 | — | ✅ | Interoception: Genesis samples its own internal state (energy, memory pressure, inference/reflection counts) as a numeric sensory stream every 50 cycles |
+| M16 | ✅ | Processor voting: independent processor agreement boosts relation confidence (Hawkins — multiple columns voting raises certainty) |
+| M17 | ✅ | Active curiosity directives: high-pred-error concepts become persistent attention targets; AdaptiveStream scores directive items 2× higher; directives auto-resolve at 3+ relations; cross-session persistent (SOAR impasse→subgoal) |
 
 ---
 
@@ -183,7 +185,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 - **Never test implementation details of lower layers from higher-layer tests.** Test M1
   in `test_survival_*.py`. Test M4 in `test_orchestrator.py`. Don't reach across layers.
 - Run full suite before committing: `python -m pytest` from `project-genesis/`.
-  Currently: **674 tests, all passing.**
+  Currently: **691 tests, all passing.**
 
 ---
 

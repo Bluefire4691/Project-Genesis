@@ -74,6 +74,9 @@ class SynthesisResult:
     cross_modal_concepts: Concepts independently found by 2+ processors.
     processors_run:       Which processors contributed (name list).
     context_terms:        All attention terms extracted — used for update_attention.
+    processor_votes:      M16 — how many independent processors found each concept.
+                          Used to boost relation confidence when multiple processors
+                          independently confirm the same concept (Hawkins voting).
     """
     primary_output: ProcessorOutput
     secondary_outputs: list[ProcessorOutput] = field(default_factory=list)
@@ -82,6 +85,7 @@ class SynthesisResult:
     cross_modal_concepts: list[str] = field(default_factory=list)
     processors_run: list[str] = field(default_factory=list)
     context_terms: list[str] = field(default_factory=list)
+    processor_votes: dict = field(default_factory=dict)
 
 
 class IntegrationLayer:
@@ -151,9 +155,17 @@ class IntegrationLayer:
             primary.confidence,
         )
 
-        # Find cross-modal concepts
+        # Find cross-modal concepts and build processor vote counts (M16)
         useful_outputs = [o for o in outputs if o.confidence > 0.05]
         cross_modal = self._find_cross_modal_concepts(useful_outputs)
+
+        # M16: count independent processor votes per concept (Hawkins voting).
+        # A concept confirmed by 2+ processors is more robustly grounded than
+        # one seen by a single processor, even many times.
+        processor_votes: dict[str, int] = {}
+        for output in useful_outputs:
+            for concept in self._extract_concepts(output):
+                processor_votes[concept] = processor_votes.get(concept, 0) + 1
 
         # Build unified attention terms from all outputs
         all_terms: set[str] = set(attention_terms)
@@ -168,6 +180,7 @@ class IntegrationLayer:
             cross_modal_concepts=cross_modal,
             processors_run=[o.source for o in outputs],
             context_terms=sorted(all_terms)[:20],  # cap for storage efficiency
+            processor_votes=processor_votes,
         )
 
     # ------------------------------------------------------------------

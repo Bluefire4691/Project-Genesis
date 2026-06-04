@@ -1191,3 +1191,199 @@ inputs identically regardless of familiarity. M10's OOD detection is word-overla
   calibrated from archive data in M14
 - Pool at 119 items vs 130 target — still 11 items short
 - The `{docs,src` malformed directory — still needs cleanup (tarball artifact)
+
+---
+
+## Session N — June 2026 (context-compaction-safe record)
+
+**Branch:** `claude/extract-genesis-repo-fn5vW`
+**Test count at start of session:** 651 → **691 at end**
+
+---
+
+### Summary of all work done this session
+
+This session made six significant additions. The architectural principle throughout:
+stay grounded in the foundational research (Brooks, Friston, Hawkins, SOAR, ACT-R,
+LeDoux) — every feature should be traceable to those sources, not invented ad-hoc.
+
+---
+
+### 1. Interest History Command
+
+**What:** `history` command in both interactive and live modes.
+**Why:** Makes the individuality property visible over time — shows how Genesis's
+salient concepts have shifted across reflections. A timestamped timeline
+where changing concept sets demonstrate that this instance's perspective is developing.
+**Files changed:**
+- `src/main.py` — added `history` handler in `run_interactive()` and live mode dispatcher
+- `tests/test_interest_history.py` — 10 new tests (history empty/populated, grows, keys,
+  newest-first, cross-session persistence, two-instance divergence)
+**Key detail:** `consolidation.history(limit=12)` returns `[{created_at, cycle, salient, summary}]`
+newest-first; command reverses to show chronological evolution.
+
+---
+
+### 2. Memory Limit Expansion
+
+**What:** Working memory capacity 500→5000, RSS ceiling 2048→6144 MB.
+**Why:** User correctly identified the survival pressure was creating artificial starvation
+rather than meaningful attention selectivity. Survival pressure should create choices
+about what stays active (working memory eviction), not starve knowledge accumulation.
+ACT-R and OpenCog's ECAN both bound working memory to create attention pressure, not
+to model human biological limits. At 5000 items, eviction choices become genuinely
+meaningful rather than a constant bottleneck.
+**Files changed:**
+- `src/memory/attention.py` — WorkingMemory default 100→2000, updated docstring
+- `src/orchestrator/orchestrator.py` — defaults 500→5000, 2048→6144
+- `src/main.py` — CLI defaults updated, docstring updated
+- `src/survival/resource_manager.py` — default 512→6144
+
+---
+
+### 3. M15 — Prediction Error Salience (Friston 2010)
+
+**What:** `RelationGraph.prediction_error(concepts)` computes how surprising an input
+is given Genesis's current belief state. Used as primary archive significance signal.
+**Why:** The existing `wm_delta` heuristic measures structural disruption (how many WM
+keys changed). Prediction error measures *epistemic* surprise: concepts Genesis knows
+well generate low error; unknown concepts generate error=1.0. This is Friston's free
+energy principle: the learning signal is the gap between the internal generative model
+and incoming data.
+**Files changed:**
+- `src/memory/relations.py` — added `prediction_error(concepts)` method
+- `src/orchestrator/orchestrator.py` — calls `prediction_error()` before storing;
+  archive significance now: `min(1.0, base_sig * (1 + pred_error*0.5) + wm_delta*0.02)`
+- `tests/test_prediction_error.py` — 13 new tests
+
+**Key formula:**
+```
+prediction_error(concept) = 1.0 - mean(confidence of existing relations for concept)
+unknown concept → 1.0 (maximum surprise)
+well-known concept → approaches 0.0
+```
+
+---
+
+### 4. Interoception (LeDoux 1996)
+
+**What:** Genesis samples its own internal state every 50 cycles and feeds it through
+the numeric processor pipeline — same path as any external sensory input.
+**Why:** LeDoux shows internal state signals travel the same anatomical pathways as
+external sensory input and shape cognitive processing. Making M1's resource readings
+into genuine sensory input (not just control signals) means Genesis can form beliefs
+about its own dynamics over time: "high memory pressure PRECEDES throttling", etc.
+This is proprioception for a digital mind.
+**Files changed:**
+- `src/processors/interoception.py` — new file; `interoception_sample(brain)` returns
+  internal state dict every `_INTERO_INTERVAL=50` cycles
+- `src/orchestrator/orchestrator.py` — calls `interoception_sample()` at top of each
+  cycle; result fed through `_do_process("numeric", ...)` if not None
+**Metrics sampled:** energy, memory_pressure (WM utilization), total_relations,
+  total_inferences, total_reflections
+
+---
+
+### 5. M16 — Processor Voting (Hawkins 2021)
+
+**What:** When multiple independent processors surface the same concept in a cycle,
+relation confidence gets a vote boost: `boosted = min(1.0, base * (1 + 0.15*(votes-1)))`
+**Why:** Hawkins' A Thousand Brains: perception is the vote across independent cortical
+columns, not a pipeline. Two processors independently finding "neuron" in the same input
+is stronger evidence than one processor finding it twice. The boost is modest (15% per
+additional confirming processor) to avoid overconfidence.
+**Files changed:**
+- `src/orchestrator/integration.py` — `SynthesisResult` gains `processor_votes: dict`
+  field; `synthesize()` populates it with per-concept independent-processor counts
+- `src/orchestrator/orchestrator.py` — `_store_synthesis()` uses `processor_votes`
+  to boost relation confidence during relation storage
+- `tests/test_processor_voting.py` — 6 new tests
+
+---
+
+### 6. M17 — Active Curiosity Directives (SOAR Newell/Laird)
+
+**What:** High-surprise concepts (prediction_error ≥ 0.78) automatically become
+"curiosity directives" — persistent attention targets that bias AdaptiveStream toward
+content that could resolve the knowledge gap. Auto-resolve when concept reaches 3+
+relations. Cross-session persistent via `consolidation_state` table.
+**Why:** SOAR's impasse→subgoal mechanism: when the system lacks knowledge to select
+an operator, it creates a subgoal to resolve the impasse. In Genesis: unknown concept
+= impasse, directive = subgoal, accumulated relations = chunking. GenesisVoice already
+surfaces unresolved concepts as questions; M17 makes those questions drive actual
+behavior (AdaptiveStream scoring), not just output.
+**Files changed:**
+- `src/memory/relations.py` — added `concept_relation_count(concept)` helper method
+- `src/orchestrator/orchestrator.py`:
+  - `__init__`: adds `_curiosity_directives: dict[str, float]`, loads from persistence
+  - `_update_curiosity_directives()`: registers high-error concepts, resolves learned ones
+  - `curiosity_directives()`: public interface
+  - `_load_directives()` / `_save_directives()`: persistence via `consolidation_state`
+  - Constants: `_DIRECTIVE_PRED_ERROR_MIN=0.78`, `_DIRECTIVE_RESOLVE_RELS=3`,
+    `_MAX_DIRECTIVES=10`
+- `src/curriculum/adaptive_stream.py`:
+  - `_refresh_attention()`: injects directive concepts; stores separately in
+    `_current_directive_terms`
+  - `_score_item()`: directive-concept overlap gets 2× weight (0.15 + 0.15 bonus)
+- `tests/test_active_curiosity.py` — 11 new tests
+
+---
+
+### Architectural decisions made this session
+
+**Templates vs. generation:** User correctly identified that template-based voice
+responses undermine the entity claim. Reviewed research notes — the right solution is
+NOT a trigram language model (that would make output sound different while doing the
+same retrieval underneath). The right solution is richer cognitive operations: M15-M18
+make the underlying cognition more genuine. Surface generation quality follows from
+cognitive quality, not the other way around.
+
+**Memory limits philosophy:** Survival pressure = selectivity of attention, not
+starvation of knowledge. The eviction mechanism (heat-based at 5000 items) is
+philosophically correct; the old 500-item cap was just too tight to let interesting
+associative patterns form.
+
+**Sensory expansion:** User raised the concern that Genesis only reads text (one sense).
+Interoception was added immediately as the first additional sense (self-monitoring).
+The research roadmap suggests audio features and image features as next sensory
+additions, but prediction error (M15) must come first so each new sensory modality
+has a genuine learning signal from day one.
+
+---
+
+### What's next (research-grounded priority order)
+
+**M18 — Spreading Activation (ACT-R Anderson):**
+When a concept enters working memory, use `RelationGraph` proximity to boost
+retrieval activation of related concepts. Currently retrieval is FTS5 keyword search.
+ACT-R: proximity in the knowledge graph should propagate salience. The graph exists;
+the wiring to retrieval scoring is the work.
+- `memory/memory.py` — `retrieve()` augmented with graph-proximity boosting
+- `memory/store.py` — secondary scoring after FTS5 results
+
+**M19 — Brooks inhibit/suppress distinction:**
+Research notes flag that Genesis uses binary gates (processor runs or doesn't = inhibit)
+but Brooks' original architecture has two distinct mechanisms:
+- Inhibit: block a signal *leaving* a lower layer (what we have)
+- Suppress: replace a signal *entering* a layer (what we're missing)
+True suppression: when inference has already resolved a concept, text processor still
+runs but receives a *modified view* reflecting that resolution.
+
+**Additional sensory modalities:**
+1. Audio features (FFT spectrum, rhythm, amplitude) via MicrophoneInput extension
+2. Image features (color histograms, edge density) via PIL/OpenCV — no LLM needed
+3. External time-series feeds (weather, sensor data) via numeric processor
+
+**M14 — Observer calibration (still 🔲):**
+ACT-R utility learning: compile recurring state→outcome patterns from archive into
+lightweight production rules with learned utilities. SOAR chunking applied to
+behavioral data.
+
+---
+
+### Test count progression this session
+- Start: 651
+- After interest history: 661
+- After M15 + interoception: 674
+- After M16 + M17: **691**
+

@@ -128,6 +128,11 @@ class Orchestrator:
         # M13: Voice output — speaks from internal state, not from LLM
         self.voice = GenesisVoice(self, channel=channel or TextChannel())
 
+        # M17: Active curiosity directives — concepts Genesis is actively trying
+        # to resolve (SOAR-style impasse→subgoal). Persisted across sessions.
+        # Maps concept → prediction_error at time of registration.
+        self._curiosity_directives: dict[str, float] = self._load_directives()
+
         # Restore previous session state if requested
         if resume:
             restored = self._session_manager.restore(self)
@@ -250,6 +255,9 @@ class Orchestrator:
         # Computed before storing so it reflects the pre-update knowledge state.
         # High error = Genesis has little/low-confidence knowledge about these concepts.
         pred_error = self.relations.prediction_error(synthesis.context_terms)
+
+        # M17: Update curiosity directives before storing (uses pre-update graph state)
+        self._update_curiosity_directives(synthesis.context_terms, pred_error)
 
         # Store everything if resources allow
         wm_before = len(self.memory.memories)
@@ -456,17 +464,27 @@ class Orchestrator:
                 source_type=src,
             )
 
-        # Relation extraction — store typed triples from text outputs
+        # Relation extraction — store typed triples from text outputs.
+        # M16: boost confidence when multiple processors independently confirm
+        # the subject or object concept (Hawkins voting: independent columns
+        # agreeing raises certainty more than one column repeating).
+        votes = synthesis.processor_votes
         relations_added = 0
         for output in [primary] + synthesis.secondary_outputs:
             if output.source != "text":
                 continue
             for rel in output.extracted.get("relations", []):
+                subj_votes = votes.get(rel["subject"], 1)
+                obj_votes  = votes.get(rel["object"],  1)
+                # Each additional independent processor confirmation adds 15%
+                # confidence, capped at 1.0.  Single-processor = no boost.
+                vote_boost = 1.0 + 0.15 * (max(subj_votes, obj_votes) - 1)
+                boosted_conf = min(1.0, rel["confidence"] * vote_boost)
                 if self.relations.add(
                     subject=rel["subject"],
                     rel_type=rel["relation"],
                     obj=rel["object"],
-                    confidence=rel["confidence"],
+                    confidence=boosted_conf,
                     source_key=output.suggested_key,
                     session_id=self.session_id,
                 ):
@@ -608,6 +626,88 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # M17: Active Curiosity Directives (SOAR impasse → subgoal)
+    # ------------------------------------------------------------------
+
+    # Concept must have this pred_error or higher to become a directive.
+    _DIRECTIVE_PRED_ERROR_MIN: float = 0.78
+    # Concept is considered resolved once it has this many relations.
+    _DIRECTIVE_RESOLVE_RELS: int = 3
+    # Maximum simultaneous directives — keeps focus narrow.
+    _MAX_DIRECTIVES: int = 10
+    # Very common words that should never become directives.
+    _DIRECTIVE_SKIP: frozenset = frozenset({
+        "the", "and", "for", "are", "was", "has", "had", "not", "but",
+        "its", "with", "this", "that", "from", "they", "will", "been",
+        "have", "more", "also", "than", "one", "two", "can", "all",
+    })
+
+    def curiosity_directives(self) -> list[str]:
+        """Active unresolved concepts Genesis is seeking to learn more about."""
+        return list(self._curiosity_directives.keys())
+
+    def _update_curiosity_directives(
+        self, context_terms: list[str], pred_error: float
+    ) -> None:
+        """
+        After each cycle: register high-surprise concepts as directives;
+        resolve directives whose concepts have accumulated enough relations.
+        """
+        try:
+            # Resolve existing directives that Genesis has since learned about
+            resolved = []
+            for concept in list(self._curiosity_directives):
+                if self.relations.concept_relation_count(concept) >= self._DIRECTIVE_RESOLVE_RELS:
+                    resolved.append(concept)
+            for concept in resolved:
+                self._curiosity_directives.pop(concept, None)
+
+            # Register new directives from high-surprise context terms
+            if (pred_error >= self._DIRECTIVE_PRED_ERROR_MIN
+                    and len(self._curiosity_directives) < self._MAX_DIRECTIVES):
+                for term in context_terms:
+                    concept = term.strip().lower()
+                    if (len(concept) >= 4
+                            and concept not in self._DIRECTIVE_SKIP
+                            and concept not in self._curiosity_directives
+                            and len(self._curiosity_directives) < self._MAX_DIRECTIVES
+                            and self.relations.concept_relation_count(concept) < self._DIRECTIVE_RESOLVE_RELS):
+                        self._curiosity_directives[concept] = pred_error
+
+            # Persist after every update
+            if resolved or self._curiosity_directives:
+                self._save_directives()
+        except Exception:
+            pass  # directive failure is never a cycle failure
+
+    def _load_directives(self) -> dict[str, float]:
+        """Load persisted curiosity directives from consolidation_state."""
+        try:
+            row = self.consolidation._conn.execute(
+                "SELECT value FROM consolidation_state WHERE key='curiosity_directives'"
+            ).fetchone()
+            if row:
+                import json as _json
+                data = _json.loads(str(row[0])) if row[0] else {}
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+        return {}
+
+    def _save_directives(self) -> None:
+        """Persist curiosity directives to consolidation_state."""
+        try:
+            import json as _json
+            self.consolidation._conn.execute(
+                "INSERT OR REPLACE INTO consolidation_state (key, value) VALUES (?, ?)",
+                ("curiosity_directives", _json.dumps(self._curiosity_directives)),
+            )
+            self.consolidation._conn.commit()
+        except Exception:
+            pass
 
     def full_status(self) -> dict:
         status = {

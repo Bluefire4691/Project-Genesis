@@ -316,6 +316,27 @@ class RelationGraph:
         }
 
     # ------------------------------------------------------------------
+    # Concept relation count (M17 helper)
+    # ------------------------------------------------------------------
+
+    def concept_relation_count(self, concept: str) -> int:
+        """
+        Total stored relations where concept appears as subject or object.
+        Normalises the concept before querying so callers don't need to.
+        """
+        c = _normalise(concept)
+        if not c:
+            return 0
+        try:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM relations WHERE subject=? OR object=?",
+                (c, c),
+            ).fetchone()
+            return row[0] if row else 0
+        except Exception:
+            return 0
+
+    # ------------------------------------------------------------------
     # Prediction error (M15)
     # ------------------------------------------------------------------
 
