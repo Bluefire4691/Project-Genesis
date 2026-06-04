@@ -145,6 +145,7 @@ class CuriosityEngine:
         """
         candidates: list[tuple[float, str]] = []
         candidates.extend(self._graph_gap_targets())
+        candidates.extend(self._reflection_targets())
         candidates.extend(self._vocabulary_targets())
         candidates.extend(self._memory_text_targets())
 
@@ -171,6 +172,17 @@ class CuriosityEngine:
                 "attention": 0.0,
                 "relations_known": 0,
             }
+
+        for score, concept in self._reflection_targets():
+            if concept not in candidates:
+                candidates[concept] = {
+                    "concept": concept,
+                    "source": "reflection",
+                    "curiosity_score": round(score, 3),
+                    "already_fetched": concept in self._fetched_topics,
+                    "attention": 0.0,
+                    "relations_known": 0,
+                }
 
         for score, concept in self._vocabulary_targets():
             if concept not in candidates:
@@ -367,6 +379,42 @@ class CuriosityEngine:
                 continue
             scored.append((100.0 + float(f), word))
 
+        return scored
+
+    # ------------------------------------------------------------------
+    # Quaternary signal: this instance's reflection-salient concepts
+    # ------------------------------------------------------------------
+
+    def _reflection_targets(self) -> list[tuple[float, str]]:
+        """
+        Concepts Genesis judged salient in its own reflections.
+
+        This is what makes instances diverge. Two Genesis instances started
+        from the same seed will process different inputs, form different
+        reflections, and therefore have different gravitational centers of
+        curiosity. One instance ends up drawn toward ecology because that
+        appeared in its salient concepts early; another gravitates toward
+        physics. The engineer never decided this — the divergence came from
+        processing history alone.
+
+        Scored between pure graph gaps (1000+) and vocabulary targets (100+):
+        reflection-salience is a real signal but doesn't override the raw
+        knowledge frontier.
+        """
+        brain = self._brain
+        try:
+            salient = brain.consolidation.salient_concepts()
+        except Exception:
+            return []
+
+        scored: list[tuple[float, str]] = []
+        for rank, concept in enumerate(salient):
+            clean = concept.strip().lower()
+            if not clean or clean in _SKIP_CONCEPTS:
+                continue
+            # Decay by rank: first concept scores ~440, eighth scores ~200.
+            score = 200.0 + max(0.0, (8 - rank) * 30.0)
+            scored.append((score, clean))
         return scored
 
     # ------------------------------------------------------------------

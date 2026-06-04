@@ -134,6 +134,8 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | M9 | ✅ | AdaptiveStream: attention-weighted input selection, feedback loop |
 | — | ✅ | Self-directed ingestion: WordNet + corpus, curiosity frontier (graph gaps → vocabulary), never plateaus |
 | — | ✅ | ConsolidationEngine: self-authored reflection ("sleep"), salience from own signals, persists across sessions |
+| — | ✅ | Individuality: reflection-salient concepts bias curiosity + adaptive attention; instances diverge from same seed |
+| — | ✅ | Conversation: intent-aware, grounded in reflection/graph, never leaks raw tokens, always learns |
 | M10 | 🔲 | Inference engine: transitive chains, wm_delta salience, OOD detection |
 | M11 | 🔲 | Contradiction detection: conflicting relations flagged, not overwritten |
 | M12 | 🔲 | Ethics through experience: consequence sequences, requires M9 |
@@ -174,7 +176,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 - **Never test implementation details of lower layers from higher-layer tests.** Test M1
   in `test_survival_*.py`. Test M4 in `test_orchestrator.py`. Don't reach across layers.
 - Run full suite before committing: `python -m pytest` from `project-genesis/`.
-  Currently: **601 tests, all passing.**
+  Currently: **620 tests, all passing.**
 
 ---
 

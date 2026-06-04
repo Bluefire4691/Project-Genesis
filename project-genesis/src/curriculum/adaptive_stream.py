@@ -119,27 +119,35 @@ class AdaptiveStream:
     # ------------------------------------------------------------------
 
     def _refresh_attention(self) -> None:
-        """Pull current attention terms from working memory."""
+        """Pull current attention terms from working memory and reflection history."""
         try:
-            wm = self._brain.memory.memories
-            if not wm:
-                self._current_attention_terms = []
-                return
-
-            # Get attention window — top-K by relevance
-            top = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)
-            top = top[:_MAX_ATTENTION_TERMS]
-
-            # Extract words from keys and contexts
             terms: set[str] = set()
-            for key, mem in top:
-                # From key (e.g. "text:wolves_deer" → "wolves", "deer")
-                for part in re.split(r"[_:\s]+", key.lower()):
-                    if len(part) >= 3:
-                        terms.add(part)
-                # From context (first 80 chars)
-                for word in re.findall(r"\b[a-z]{3,}\b", mem.context.lower()[:80]):
-                    terms.add(word)
+
+            wm = self._brain.memory.memories
+            if wm:
+                # Get attention window — top-K by relevance
+                top = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)
+                top = top[:_MAX_ATTENTION_TERMS]
+
+                for key, mem in top:
+                    for part in re.split(r"[_:\s]+", key.lower()):
+                        if len(part) >= 3:
+                            terms.add(part)
+                    for word in re.findall(r"\b[a-z]{3,}\b", mem.context.lower()[:80]):
+                        terms.add(word)
+
+            # Augment with reflection-salient concepts — this instance's longer-term
+            # interests. Two instances with different histories will reflect on different
+            # concepts and therefore exhibit different attention biases here, producing
+            # genuinely divergent processing paths from the same underlying stream.
+            try:
+                salient = self._brain.consolidation.salient_concepts()
+                for concept in salient[:8]:
+                    for word in re.split(r"[\s_-]+", concept.lower()):
+                        if len(word) >= 3:
+                            terms.add(word)
+            except Exception:
+                pass
 
             self._current_attention_terms = list(terms)
         except Exception:
