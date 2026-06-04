@@ -155,6 +155,23 @@ def test_greeting_survives_session_restart():
     )
 
 
+def test_greeting_mentions_new_connections_after_growth():
+    """If relations grew since the last reflection, greeting mentions the delta."""
+    b = _brain()
+    _teach(b, ["A neuron is a cell.", "A neuron enables signaling."])
+    b.reflect()  # snapshot: relations_total at reflection time
+
+    # Add more relations AFTER the reflection (simulating inter-session growth)
+    _teach(b, ["Neurons contain axons.", "Axons enable transmission."])
+
+    g = b.voice.wake_greeting()
+    _assert_clean(g)
+    # Should mention the new connections
+    assert "new connection" in g.lower() or "added" in g.lower() or "connection" in g.lower(), (
+        f"Greeting should mention new connections: {g!r}"
+    )
+
+
 def test_two_sessions_different_histories_give_different_greetings():
     """Two brains with different histories give different wake greetings."""
     db1 = tempfile.NamedTemporaryFile(suffix=".db", delete=False); db1.close()

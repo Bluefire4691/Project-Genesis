@@ -222,6 +222,28 @@ class GenesisVoice:
                     f"{'s' if inf_total != 1 else ''} from the connections I've built."
                 )
 
+        # ── What grew since the last reflection (session-change visibility) ──
+        try:
+            rel_now = self._brain.relations.stats().get("total_relations", 0)
+            prev_stats = reflection.get("stats", {})
+            rel_then = prev_stats.get("relations_total", 0)
+            delta_rel = rel_now - rel_then
+            inf_now = self._brain.inference.stats().get("total_inferences", 0)
+            inf_then = prev_stats.get("inferences_total", 0)
+            delta_inf = inf_now - inf_then
+            if delta_rel > 0 or delta_inf > 0:
+                changes = []
+                if delta_rel > 0:
+                    changes.append(f"{delta_rel} new connection"
+                                   f"{'s' if delta_rel != 1 else ''}")
+                if delta_inf > 0:
+                    changes.append(f"{delta_inf} new conclusion"
+                                   f"{'s' if delta_inf != 1 else ''}")
+                parts.append(f"Since my last reflection, I've added "
+                             f"{' and '.join(changes)}.")
+        except Exception:
+            pass
+
         # ── What I'm still curious about ──
         gaps = self._open_gaps()
         if gaps:
