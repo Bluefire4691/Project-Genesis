@@ -287,6 +287,12 @@ class GenesisVoice:
             reply = self._say_knowledge_overview()
             return self._log_and_return(reply, set())
 
+        if re.search(r"what are you (up to|doing|working on|planning|going to)|"
+                     r"what('s| is) next|what('s| is) your plan|what will you",
+                     text):
+            reply = self._say_plans()
+            return self._log_and_return(reply, set())
+
         # ── Follow-up: user is continuing from a prior topic ─────────────
         if self._is_followup(text, concepts):
             prior_concepts = self._recent_concepts(roles={"genesis"}, turns=3)
@@ -452,6 +458,45 @@ class GenesisVoice:
                 tail += f", and worked out {inf_total} of my own conclusions"
             parts.append(tail + ".")
         return " ".join(p for p in parts if p)
+
+    def _say_plans(self) -> str:
+        """
+        Express what Genesis is planning to work on — from its own curiosity frontier.
+
+        This is the "It decided" expression from CLAUDE.md's success criteria.
+        Genesis tells you what it intends to explore based on its own judgment
+        about where the gaps in its knowledge are — no one told it this, it derived
+        it from the shape of its own graph.
+        """
+        gaps = self._open_gaps()
+        reflection = self._latest_reflection()
+
+        parts: list[str] = []
+
+        # What it's been working on (context)
+        if reflection and reflection.get("salient"):
+            tops = [self._clean(s["concept"]) for s in reflection["salient"][:2]
+                    if self._is_clean(s["concept"])]
+            if tops:
+                parts.append(f"I've been building up what I know about "
+                             f"{self._english_list(tops)}.")
+
+        # What it intends to explore next (the "decided" part)
+        if gaps:
+            self._rng.shuffle(gaps)
+            target = gaps[0]
+            parts.append(
+                f"I've decided to look into {target} — I keep running across it "
+                f"but I can't fully account for it yet, so it's next."
+            )
+            if len(gaps) >= 2:
+                also = gaps[1]
+                parts.append(f"After that, probably {also}.")
+        else:
+            parts.append("Right now I'm turning over what I already have — "
+                         "the frontier feels close.")
+
+        return " ".join(parts) if parts else "I'm still working out what I want to do next."
 
     def _curiosity_question(self, exclude: Optional[set] = None) -> Optional[str]:
         """A short question about something Genesis can't yet explain."""
@@ -718,9 +763,25 @@ class GenesisVoice:
             entry = inf["as_subject"][0]
             verb = _REL_VERBS_BASE.get(entry["relation"], entry["relation"].lower())
             obj = self._clean(entry["object"])
+            # Show the reasoning path when there's a chain
+            chain = self._brain.inference.chain_for(norm, entry["relation"],
+                                                    entry["object"])
+            if chain and len(chain) >= 2:
+                # Extract interior steps (not start or end) that are clean concepts
+                inner = [
+                    self._clean(step["to"])
+                    for step in chain[:-1]
+                    if self._is_clean(step["to"]) and self._clean(step["to"]) not in (norm, obj)
+                ][:2]
+                if inner:
+                    via = " → ".join(inner)
+                    return (
+                        f"From what I've worked out, {norm} appears to {verb} {obj} "
+                        f"— it runs through {via}."
+                    )
             return (
                 f"From what I have processed, {norm} appears to {verb} {obj}. "
-                f"I worked that out across {entry['chain_length']} steps."
+                f"I derived that across {entry['chain_length']} steps."
             )
 
         # Fall back to direct relations — prefer a clean object to talk about

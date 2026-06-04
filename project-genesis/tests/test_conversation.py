@@ -125,3 +125,34 @@ def test_grammar_no_appears_to_is():
         reply = b.voice.chat_respond("tell me about neuron")
         assert "appears to is" not in reply.lower()
         assert "to is a type" not in reply.lower()
+
+
+# ==================================================================
+# "What are you up to?" — the "it decided" expression
+# ==================================================================
+
+def test_plans_question_is_clean_and_nonempty():
+    b = _taught_brain()
+    reply = b.voice.chat_respond("what are you up to?")
+    _assert_clean(reply)
+
+
+def test_plans_question_mentions_next_step():
+    b = _taught_brain()
+    reply = b.voice.chat_respond("what are you working on?").lower()
+    _assert_clean(reply)
+    # Should express intent about something Genesis wants to learn
+    intent_words = ["decided", "going to", "planning", "turning over",
+                    "building", "explore", "look into", "next"]
+    assert any(w in reply for w in intent_words), (
+        f"plans reply should express intent: {reply!r}"
+    )
+
+
+def test_plans_question_alternative_phrasings():
+    b = _taught_brain()
+    for phrasing in ["what's next?", "what are you planning?",
+                     "what are you going to do?"]:
+        reply = b.voice.chat_respond(phrasing)
+        _assert_clean(reply)
+        assert reply.strip()
