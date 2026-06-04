@@ -110,6 +110,12 @@ class Orchestrator:
         from consolidation import ConsolidationEngine
         self.consolidation = ConsolidationEngine(self)
 
+        # M14: Observer calibration — empirical thresholds from behavioral history.
+        # Shares the memory DB connection (no extra file). Loaded first so restored
+        # thresholds are active before the first cycle runs.
+        from interface.observer_calibration import ObserverCalibration
+        self._calibration = ObserverCalibration(_conn)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -123,6 +129,10 @@ class Orchestrator:
             interaction if interaction is not None
             else InteractionLayer(self.memory)
         )
+        # Restore any previously calibrated Observer thresholds so the first cycle
+        # benefits from accumulated behavioral history, not just hardcoded defaults.
+        self._calibration.load_calibrated(self.interaction._observer)
+
         self.integrator = IntegrationLayer(self.memory)
 
         # M13: Voice output — speaks from internal state, not from LLM
@@ -524,8 +534,25 @@ class Orchestrator:
         Run a consolidation pass — Genesis reflects on what it has processed
         and decides for itself what mattered. Returns the reflection report.
         """
-        return self.consolidation.consolidate(cycle=cycle or self.cycle_count,
-                                               top_k=top_k)
+        result = self.consolidation.consolidate(
+            cycle=cycle or self.cycle_count, top_k=top_k
+        )
+        # M14: Calibrate Observer thresholds from accumulated behavioral history.
+        # Runs after each reflection so calibration has the richest possible data —
+        # the same history that consolidation just summarized.
+        try:
+            cal = self._calibration.calibrate(
+                self.interaction._observer, self.cycle_count
+            )
+            if not cal.skipped and self.verbose:
+                self._log(
+                    f"  🎯 Observer calibrated: {len(cal.thresholds)} thresholds "
+                    f"(confidence={cal.confidence:.2f}, "
+                    f"data={cal.data_points} entries)"
+                )
+        except Exception:
+            pass  # calibration failure never affects the reflection result
+        return result
 
     def latest_reflection(self) -> dict | None:
         """The most recent reflection — what Genesis has been thinking about."""

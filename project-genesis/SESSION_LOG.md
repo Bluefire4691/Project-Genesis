@@ -1374,16 +1374,82 @@ runs but receives a *modified view* reflecting that resolution.
 2. Image features (color histograms, edge density) via PIL/OpenCV — no LLM needed
 3. External time-series feeds (weather, sensor data) via numeric processor
 
-**M14 — Observer calibration (still 🔲):**
-ACT-R utility learning: compile recurring state→outcome patterns from archive into
-lightweight production rules with learned utilities. SOAR chunking applied to
-behavioral data.
-
 ---
 
 ### Test count progression this session
 - Start: 651
 - After interest history: 661
 - After M15 + interoception: 674
-- After M16 + M17: **691**
+- After M16 + M17: 691
+- After M14 (Observer calibration): **721**
+
+---
+
+## Session N+1 — June 4, 2026
+
+### What was built
+
+**M14 — Observer Calibration (complete ✅)**
+
+`src/interface/observer_calibration.py` (was already written) wired into the system:
+
+1. **`orchestrator.py` — `__init__`**: `ObserverCalibration` instantiated with the shared DB
+   connection. Immediately calls `load_calibrated(interaction._observer)` so the first cycle
+   benefits from any calibration data accumulated in prior sessions.
+
+2. **`orchestrator.py` — `reflect()`**: After each consolidation pass, calibration runs.
+   This timing is intentional — calibration has access to the same behavioral history that
+   consolidation just summarized, giving it the most complete possible data.
+
+3. **`tests/test_observer_calibration.py`** — 30 tests covering:
+   - `_step_int` / `_step_float` incremental adjustment helpers
+   - `CalibrationResult` dataclass structure
+   - Skip behavior when below minimum data (`_MIN_ARCHIVE_ENTRIES=50`, `_MIN_RELATIONS=10`)
+   - Full calibration proceeds with sufficient data
+   - Output structure: all 5 threshold names present
+   - Bounds respected after `_apply()`
+   - `_apply()` correctly sets Observer attributes
+   - Out-of-bounds clamping in `_apply()`
+   - `_persist()` writes to and overwrites `consolidation_state`
+   - `load_calibrated()` false on empty DB, restores on valid data, graceful on corrupt data
+   - Incremental adjustment: single pass moves at most `_MAX_STEP_CYCLES` cycles
+   - Confidence scaling (0.0 → 1.0 as entries approach 500)
+   - Integration: `reflect()` doesn't crash without data; `_calibration` attr exists
+   - Cross-session persistence: calibration data from session 1 loads into Observer in session 2
+
+### Architectural decisions made this session
+
+**Why calibration runs in `reflect()` not `process_input()`:** Calibration looks at
+archive statistics and relation timestamps — aggregate behavioral patterns, not cycle-by-cycle
+changes. Running it every cycle would waste cycles; running it at reflection time pairs it
+with the moment Genesis has just computed its own salience signals, giving calibration access
+to the richest possible data snapshot.
+
+**Incremental adjustment (not snap-to-target):** Each calibration pass moves thresholds by
+at most `_MAX_STEP_CYCLES=3` cycles or `_MAX_STEP_FLOAT=0.05`. This prevents a single
+unusual behavioral period from overreacting — matches ACT-R's gradual utility convergence
+rather than abrupt rule replacement.
+
+**Min data requirements:** 50 archive entries + 10 relations before calibration fires.
+A fresh Genesis has no behavioral baseline; calibrating on first session would produce
+noise-driven thresholds. The defaults are better than noise.
+
+### What's next (research-grounded priority order)
+
+**M18 — Spreading Activation (ACT-R Anderson):**
+When a concept enters working memory, use `RelationGraph` proximity to boost retrieval
+activation of related concepts. Currently retrieval is FTS5 keyword search only.
+ACT-R: graph proximity should propagate salience. The graph exists; the wiring to
+retrieval scoring is the work.
+- `memory/memory.py` — `retrieve()` augmented with graph-proximity boosting
+- `memory/store.py` — secondary scoring after FTS5 results
+
+**M19 — Brooks inhibit/suppress distinction:**
+True suppression = higher layer substitutes what lower layer *receives*, not just binary
+on/off gate. When inference resolves a concept, text processor receives a modified view.
+
+**Additional sensory modalities:**
+1. Audio features (FFT spectrum, rhythm, amplitude)
+2. Image features (color histograms, edge density) — no LLM needed
+3. External time-series feeds (weather, sensor data)
 
