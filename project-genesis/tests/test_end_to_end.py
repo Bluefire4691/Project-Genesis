@@ -172,6 +172,37 @@ class TestFrontierHonesty:
         finally:
             os.unlink(db)
 
+    def test_exhausted_state_survives_restart(self):
+        """
+        The 'relations get stuck' bug: strike counts were in-memory only, so a
+        restart re-drained the same dead concepts every session. The exhausted
+        state must persist to the DB and reload on a fresh feeder/brain.
+        """
+        from orchestrator.orchestrator import Orchestrator
+        from ingestion.feeder import KnowledgeFeeder
+        _wordnet()
+        db = tempfile.mktemp(suffix=".db")
+        try:
+            brain1 = Orchestrator(verbose=False, db_path=db)
+            feeder1 = KnowledgeFeeder(brain1)
+            feeder1._unproductive["wolf"] = feeder1._MAX_STRIKES
+            feeder1._failed_topics.add("zzzznotaword")
+            feeder1._persist_topic("wolf")
+            feeder1._persist_topic("zzzznotaword")
+
+            # Simulate a restart: brand new brain + feeder on the SAME db
+            brain2 = Orchestrator(verbose=False, db_path=db)
+            feeder2 = KnowledgeFeeder(brain2)
+            assert feeder2._unproductive.get("wolf", 0) >= feeder2._MAX_STRIKES, (
+                "Strike state did not survive restart — Genesis will re-drain "
+                "exhausted concepts every session."
+            )
+            assert "zzzznotaword" in feeder2._failed_topics, (
+                "Failed-topic state did not survive restart."
+            )
+        finally:
+            os.unlink(db)
+
 
 class TestChunkerStructure:
     def test_short_clean_sentences_are_not_discarded(self):

@@ -61,6 +61,15 @@ class KnowledgeFeeder:
         # feeder stops wasting cycles re-reading what it already fully knows.
         self._unproductive: dict[str, int] = {}
 
+        # Persist exhausted-topic state across sessions. Without this the
+        # strike counts reset on every restart, so Genesis re-drains the same
+        # dead-end concepts each session and the relation graph appears to
+        # "get stuck" — fetching, finding nothing new, and never moving on.
+        self._conn = getattr(brain, "relations", None)
+        self._conn = getattr(self._conn, "_conn", None)
+        self._init_state_schema()
+        self._load_state()
+
     _MAX_TOPICS_PER_RUN = 10
     _MAX_STRIKES = 2          # unproductive fetches before a topic is set aside
 
@@ -120,6 +129,7 @@ class KnowledgeFeeder:
                 self._unproductive[topic] = 0
             else:
                 self._unproductive[topic] = self._unproductive.get(topic, 0) + 1
+            self._persist_topic(topic)
 
             results.append(result)
             self._total_topics_fetched += 1
@@ -144,6 +154,64 @@ class KnowledgeFeeder:
             "relations_added": relations_after - relations_before,
             "per_topic": results,
         }
+
+    # ------------------------------------------------------------------
+    # Cross-session exhausted-topic state
+    # ------------------------------------------------------------------
+
+    def _init_state_schema(self) -> None:
+        """Create the table that remembers which topics are drained/dead."""
+        if self._conn is None:
+            return
+        try:
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS feeder_topic_state (
+                    concept   TEXT PRIMARY KEY,
+                    strikes   INTEGER NOT NULL DEFAULT 0,
+                    failed    INTEGER NOT NULL DEFAULT 0,
+                    updated_at REAL NOT NULL
+                )
+            """)
+            self._conn.commit()
+        except Exception:
+            self._conn = None  # disable persistence rather than crash ingestion
+
+    def _load_state(self) -> None:
+        """Restore strike counts and failed topics from a previous session."""
+        if self._conn is None:
+            return
+        try:
+            for concept, strikes, failed in self._conn.execute(
+                "SELECT concept, strikes, failed FROM feeder_topic_state"
+            ).fetchall():
+                if strikes:
+                    self._unproductive[concept] = strikes
+                if failed:
+                    self._failed_topics.add(concept)
+        except Exception:
+            pass
+
+    def _persist_topic(self, concept: str) -> None:
+        """Write one topic's current strike/failed state to the DB."""
+        if self._conn is None:
+            return
+        try:
+            self._conn.execute("""
+                INSERT INTO feeder_topic_state (concept, strikes, failed, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(concept) DO UPDATE SET
+                    strikes=excluded.strikes,
+                    failed=excluded.failed,
+                    updated_at=excluded.updated_at
+            """, (
+                concept,
+                self._unproductive.get(concept, 0),
+                1 if concept in self._failed_topics else 0,
+                time.time(),
+            ))
+            self._conn.commit()
+        except Exception:
+            pass
 
     def curiosity_report(self) -> list[dict]:
         """Show what Genesis is most curious about without fetching."""
@@ -206,6 +274,7 @@ class KnowledgeFeeder:
             if verbose:
                 print(f"  [Curiosity] ✗ No sources found for '{topic}'")
             self._failed_topics.add(topic)
+            self._persist_topic(topic)
             return {
                 "topic": topic, "title": "", "success": False,
                 "chunks_processed": 0, "elapsed_s": 0,
