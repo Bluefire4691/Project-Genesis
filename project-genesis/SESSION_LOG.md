@@ -1453,3 +1453,72 @@ on/off gate. When inference resolves a concept, text processor receives a modifi
 2. Image features (color histograms, edge density) — no LLM needed
 3. External time-series feeds (weather, sensor data)
 
+
+---
+
+## Session N+2 — June 4, 2026
+
+**Branch:** `claude/extract-genesis-repo-fn5vW`
+
+### What happened
+
+Completed M18: Belief Revision — the ability to "cross out wrong answers" when
+stronger evidence arrives.
+
+### What was built
+
+**`src/cognition/belief_revision.py`** — full M18 implementation
+
+Three new DB tables:
+- `relation_sources` — corroboration ledger: which sessions independently confirmed each relation
+- `source_trust` — per-session reliability score (rises when corroborated, falls when contradicted)
+- `belief_revisions` — full audit trail of what Genesis changed its mind about and why
+- ALTER TABLE adds `revision_status` to `contradiction_log`
+
+Core mechanism:
+- `evidence_strength = confidence × corroboration_factor × source_trust`
+- Corroboration: independent sessions (not citation volume). 100 citations from one
+  fraudulent source ≠ corroboration. Three independent sessions add 3× bonus capped at 4.
+- Three resolution outcomes: REVISE (ratio ≥ 1.40), RESIST (ratio < threshold),
+  TENSION (genuinely uncertain — curiosity directive registered)
+- Wakefield cascade: when source trust drops below 0.35, confidence on beliefs that source
+  originated alone is proportionally reduced
+- Confidence floor: 0.10. Beliefs are demoted, never deleted (total retention principle)
+
+**`src/orchestrator/orchestrator.py`** — wired M18 in
+
+1. `__init__`: `BeliefRevision` instantiated with shared DB connection
+2. `_store_synthesis()` relations loop: `record_source()` after each successful `relations.add()`
+3. `_store_synthesis()` after contradiction scan: `evaluate_and_revise()` runs automatically
+
+**`tests/test_belief_revision.py`** — 48 tests, all passing
+
+Coverage: schema, corroboration tracking, source trust, evidence strength,
+REVISE/RESIST/TENSION outcomes, confidence floor, Wakefield cascade, audit trail,
+query interface, orchestrator integration smoke test.
+
+**`knowledge_eval.py`** — Test 3 and Test 5 updated
+
+- Test 3 now calls `evaluate_and_revise()` after contradiction scan and measures
+  confidence change on the weaker belief
+- Test 5 rewrites the "honest gap" section as a live demonstration of M18
+
+### Test suite
+
+769 tests, all passing (+48 from M18).
+
+### Architectural decisions made this session
+
+**Why corroboration beats confidence alone:**
+A belief at confidence 0.85 from one session is weaker than a belief at 0.70 from four
+independent sessions. The Wakefield principle: trust is a revisable belief, and a trust
+drop cascades backward to beliefs that depended on that source.
+
+**Why three outcomes not two:**
+REVISE requires a clear winner (ratio ≥ 1.40×). When evidence is too close, RESIST
+holds current beliefs while registering the tension. TENSION (equal strength) becomes
+an active curiosity directive — Genesis seeks more data rather than flipping a coin.
+
+**Why beliefs are never deleted:**
+Total retention is architecturally load-bearing. A belief at 0.10 confidence still exists
+in the audit trail. Wrong things Genesis once believed are part of its history.

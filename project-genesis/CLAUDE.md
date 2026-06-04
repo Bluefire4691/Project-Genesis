@@ -150,6 +150,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | — | ✅ | Interoception: Genesis samples its own internal state (energy, memory pressure, inference/reflection counts) as a numeric sensory stream every 50 cycles |
 | M16 | ✅ | Processor voting: independent processor agreement boosts relation confidence (Hawkins — multiple columns voting raises certainty) |
 | M17 | ✅ | Active curiosity directives: high-pred-error concepts become persistent attention targets; AdaptiveStream scores directive items 2× higher; directives auto-resolve at 3+ relations; cross-session persistent (SOAR impasse→subgoal) |
+| M18 | ✅ | Belief revision: evidence-weighted contradiction resolution (REVISE/RESIST/TENSION); corroboration provenance ledger (independent sessions, not citation count); source trust tracks per-session reliability and cascades when a source is discredited (Wakefield principle); beliefs demoted to floor, never erased (total retention); full audit trail of what Genesis changed its mind about and why |
 
 ---
 
@@ -185,7 +186,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 - **Never test implementation details of lower layers from higher-layer tests.** Test M1
   in `test_survival_*.py`. Test M4 in `test_orchestrator.py`. Don't reach across layers.
 - Run full suite before committing: `python -m pytest` from `project-genesis/`.
-  Currently: **721 tests, all passing.**
+  Currently: **769 tests, all passing.**
 
 ---
 

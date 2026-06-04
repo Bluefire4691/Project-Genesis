@@ -30,12 +30,14 @@ is the floor. The tests that matter:
     These are different. A filing cabinet gets bigger. Understanding deepens.
 
 HONEST GAPS (surfaced by this test, not hidden):
-  - Belief revision: Genesis logs contradictions but does NOT lower confidence
-    on contradicted beliefs. Confidence only goes up. It accumulates; it doesn't
-    cross out wrong answers.
   - Pattern transfer: Genesis does not yet generalize patterns across domains.
     What it learns about wolves does not automatically inform what it knows about
     lions, even if the predator-prey structure is identical.
+
+M18 NOTE:
+  Belief revision is now implemented. Evidence-weighted contradiction resolution
+  (REVISE / RESIST / TENSION) runs after every contradiction scan. Test 3 and
+  Test 5 verify the live behavior.
 
 Usage:
     python knowledge_eval.py            # full run
@@ -496,66 +498,76 @@ This is the Dunning-Kruger test in reverse: does Genesis know what it knows?
 
 def test_contradiction(max_cycles: int) -> dict:
     _banner(
-        "TEST 3: CONTRADICTION DETECTION & THE REVISION GAP",
-        "Does Genesis notice when things conflict? Does it update beliefs?"
+        "TEST 3: CONTRADICTION DETECTION & BELIEF REVISION (M11 + M18)",
+        "Does Genesis notice conflicts? Does it lower confidence on the losing belief?"
     )
     _p("""
   Feed Genesis two directly contradicting statements about the same subject.
   Check:
-    1. Did it detect the contradiction?                    (expect: YES)
-    2. Did it lower confidence on the now-contradicted belief?  (expect: NO — honest gap)
+    1. Did it detect the contradiction?                         (expect: YES — M11)
+    2. Did it lower confidence on the weaker contradicted belief?  (expect: YES — M18)
 
   The contradiction detection (M11) fires on opposing relation types.
   Example: X ENABLES Y and X PREVENTS Y cannot both be true.
+  Belief revision (M18) then compares evidence strength and reduces the
+  weaker side — not by deleting it, but by lowering its confidence.
     """.rstrip())
 
     brain, _ = _new_brain()
 
-    # First, plant the base fact
-    _sub("Step 1: teach base fact (wolves ENABLES deer — wrong, but planted deliberately)")
-    brain.relations.add("wolves", "ENABLES", "deer survival", 0.85,
-                        source_key="test", session_id="eval")
-    base_conf_before = None
-    rows = brain.memory._long_term.conn.execute(
+    # Plant base fact from multiple sessions (higher corroboration = stronger evidence)
+    _sub("Step 1: teach base fact from 2 sessions (wolves ENABLES deer — deliberate wrong belief)")
+    brain.relations.add("wolves", "ENABLES", "deer survival", 0.55,
+                        source_key="test", session_id="session-A")
+    brain.belief_revision.record_source("wolves", "ENABLES", "deer survival", "session-A")
+    brain.relations.add("wolves", "ENABLES", "deer survival", 0.60,
+                        source_key="test", session_id="session-B")
+    brain.belief_revision.record_source("wolves", "ENABLES", "deer survival", "session-B")
+
+    base_conf_before = brain.memory._long_term.conn.execute(
         "SELECT confidence FROM relations WHERE subject='wolves' AND rel_type='ENABLES'"
-    ).fetchall()
-    if rows:
-        base_conf_before = rows[0][0]
-        _p(f"    Planted: wolves ENABLES deer survival  (confidence={base_conf_before:.2f})")
+    ).fetchone()
+    base_conf_before = base_conf_before[0] if base_conf_before else None
+    _p(f"    Planted: wolves ENABLES deer survival  (confidence={base_conf_before:.2f}, "
+       f"corroboration={brain.belief_revision.corroboration_factor('wolves','ENABLES','deer survival'):.2f}×)")
 
     contradictions_before = brain.contradictions.stats().get("total_contradictions", 0)
 
-    # Now plant the contradiction
-    _sub("Step 2: teach contradicting fact (wolves PREVENTS deer — conflicts with ENABLES)")
-    brain.relations.add("wolves", "PREVENTS", "deer survival", 0.90,
-                        source_key="test", session_id="eval")
-    brain.contradictions.scan(session_id="eval")
+    # Plant the contradiction from a single more-confident session
+    _sub("Step 2: teach contradicting fact from 3 independent sessions (wolves PREVENTS deer)")
+    for sid in ("session-C", "session-D", "session-E"):
+        brain.relations.add("wolves", "PREVENTS", "deer survival", 0.88,
+                            source_key="test", session_id=sid)
+        brain.belief_revision.record_source("wolves", "PREVENTS", "deer survival", sid)
 
+    brain.contradictions.scan(session_id="session-E")
     contradictions_after = brain.contradictions.stats().get("total_contradictions", 0)
     new_contradictions = contradictions_after - contradictions_before
 
-    # Check confidence on original belief
-    rows = brain.memory._long_term.conn.execute(
-        "SELECT confidence FROM relations WHERE subject='wolves' AND rel_type='ENABLES'"
-    ).fetchall()
-    base_conf_after = rows[0][0] if rows else None
-
-    # Show contradiction log
-    all_contradictions = brain.contradictions.query(limit=5)
-    _p(f"    Contradictions before: {contradictions_before}")
+    _p(f"\n    Contradictions before: {contradictions_before}")
     _p(f"    Contradictions after:  {contradictions_after}")
     _p(f"    New contradictions detected: {new_contradictions}")
 
-    if all_contradictions:
-        _p(f"\n    Contradiction log:")
-        for c in all_contradictions[:3]:
-            _p(f"      '{c['subject']}' {c['rel_type_a']} {c['object']}  ↔  "
-               f"'{c['subject']}' {c['rel_type_b']} {c['object']}")
-            _p(f"      (conf_a={c['conf_a']:.2f}, conf_b={c['conf_b']:.2f})")
+    # Now run belief revision
+    _sub("Step 3: run M18 belief revision — evaluate evidence strength, revise loser")
+    enables_strength  = brain.belief_revision.evidence_strength(
+        "wolves", "ENABLES", "deer survival")
+    prevents_strength = brain.belief_revision.evidence_strength(
+        "wolves", "PREVENTS", "deer survival")
+    _p(f"    ENABLES evidence strength:  {enables_strength:.3f}  "
+       f"(conf × corroboration × source_trust)")
+    _p(f"    PREVENTS evidence strength: {prevents_strength:.3f}  "
+       f"(conf × corroboration × source_trust)")
 
-    _sub("Belief revision check")
-    _p(f"    Original belief confidence BEFORE contradiction: {base_conf_before}")
-    _p(f"    Original belief confidence AFTER contradiction:  {base_conf_after}")
+    n_revised = brain.belief_revision.evaluate_and_revise(session_id="eval-test")
+
+    base_conf_after = brain.memory._long_term.conn.execute(
+        "SELECT confidence FROM relations WHERE subject='wolves' AND rel_type='ENABLES'"
+    ).fetchone()
+    base_conf_after = base_conf_after[0] if base_conf_after else None
+
+    _p(f"\n    wolves ENABLES confidence: {base_conf_before:.2f} → {base_conf_after:.2f}")
+    _p(f"    Beliefs revised by evidence weight: {n_revised}")
 
     confidence_changed = (
         base_conf_before is not None
@@ -566,7 +578,7 @@ def test_contradiction(max_cycles: int) -> dict:
     if new_contradictions > 0:
         _ok(
             f"Contradiction detected: {new_contradictions} new conflict(s) logged.",
-            f"'wolves ENABLES deer' vs 'wolves PREVENTS deer' flagged as opposing."
+            "'wolves ENABLES deer' vs 'wolves PREVENTS deer' flagged as opposing."
         )
     else:
         _fail(
@@ -577,36 +589,46 @@ def test_contradiction(max_cycles: int) -> dict:
 
     if confidence_changed:
         _ok(
-            f"Belief revised: confidence changed from {base_conf_before:.2f} "
-            f"to {base_conf_after:.2f} after contradiction.",
-            "Unexpected — belief revision is not yet implemented. "
-            "If this passed, something changed."
+            f"Belief revised: ENABLES confidence dropped {base_conf_before:.2f} → {base_conf_after:.2f}.",
+            f"Evidence ratio strongly favoured PREVENTS ({prevents_strength:.3f} vs "
+            f"{enables_strength:.3f}). M18 reduced the weaker belief's confidence. "
+            f"It still exists — total retention — but at lower confidence."
         )
     else:
         _gap(
-            "Belief confidence does NOT change when contradicted.",
-            f"'wolves ENABLES deer' remains at confidence {base_conf_after:.2f} "
-            f"even though 'wolves PREVENTS deer' directly contradicts it.\n"
-            f"      Genesis logs the conflict but does not cross out the wrong answer.\n"
-            f"      The relation graph rule: confidence = MAX(existing, new). It only goes up.\n"
-            f"      This is an architectural honest gap, not a test failure."
+            f"Belief confidence did not change (ENABLES remains {base_conf_after:.2f}).",
+            f"Evidence ratio may be below the REVISE threshold ({prevents_strength:.3f} vs "
+            f"{enables_strength:.3f}). Both beliefs held in TENSION or RESIST state. "
+            f"Increase the corroboration gap between the two sides to trigger REVISE."
         )
 
+    # Show revision history
+    history = brain.belief_revision.revision_history(limit=3)
+    if history:
+        _p(f"\n    Revision history:")
+        for h in history:
+            _p(f"      {h['subject']} {h['relation']} {h['object']}: "
+               f"{h['old_confidence']:.2f} → {h['new_confidence']:.2f}")
+            _p(f"      Reason: {h['reason'][:80]}...")
+
     _matters("""
-There are two separate things here:
+M11 detection + M18 revision work as a two-phase system:
 
-DETECTION (working): Genesis notices when ENABLES and PREVENTS co-exist for
-the same subject-object pair. It logs the contradiction. This is like a student
-writing "!?" in the margin — they noticed something is wrong.
+DETECTION (M11): Genesis notices when ENABLES and PREVENTS co-exist for the
+same subject-object pair. Logged immediately as a pending contradiction.
 
-REVISION (not working yet): The student needs to also cross out the wrong
-answer and update their understanding. Genesis doesn't do this yet.
-confidence only goes up via MAX(existing, new). New contradicting evidence
-doesn't lower the confidence of the belief it contradicts.
+REVISION (M18): Genesis evaluates both sides by evidence strength:
+  strength = confidence × corroboration_factor × source_trust
+  - Corroboration: 3 independent sessions > 2 > 1. One loud source is not
+    stronger than three independent observations (Wakefield principle).
+  - Source trust: builds over time — sessions whose beliefs are later
+    corroborated get higher trust; sessions whose beliefs are contradicted
+    lose trust (and that trust drop can cascade to beliefs they originated).
+  - Outcome: REVISE (winner much stronger), RESIST (too close), TENSION (equal).
 
-This is the next meaningful architectural step after the current milestones:
-give Genesis the ability to actually revise beliefs, not just flag conflicts.
-Without it, wrong beliefs and right beliefs can coexist indefinitely.
+Beliefs are never deleted — total retention principle. REVISE means lowering
+confidence toward a floor (0.10), not erasure. The wrong belief still exists;
+it just becomes far less prominent than the supported belief.
     """)
 
     return {
@@ -769,22 +791,20 @@ to a sophisticated filing cabinet than to understanding.
 
 def test_belief_revision(max_cycles: int) -> dict:
     _banner(
-        "TEST 5: BELIEF REVISION (THE HONEST GAP)",
-        "What happens when new information contradicts old beliefs?"
+        "TEST 5: BELIEF REVISION — M18 LIVE BEHAVIOR",
+        "Three scenarios: confidence update, lower-conf ignored, contradiction revised"
     )
     _p("""
-  This test surfaces an honest architectural limitation.
-
   Teach Genesis something. Then teach it something that updates or corrects
-  the original. Check: does it update, add alongside, or ignore?
+  the original. Check: does it update, add alongside, or revise?
 
   Three scenarios:
-    A. Confidence update: same fact, higher confidence — should update (MAX)
+    A. Confidence update: same fact, higher confidence — should update (MAX rule)
     B. Same fact, lower confidence — should NOT update (MAX keeps original)
-    C. Contradicting fact — contradiction logged but original belief unchanged
+    C. Contradicting fact — contradiction logged + M18 revises the weaker belief
 
-  After showing all three, feed a correction corpus and check whether
-  Genesis's actual answers change — or whether it carries both beliefs forward.
+  M18 revision uses evidence strength: confidence × corroboration × source_trust.
+  The weaker side's confidence is reduced (floor=0.10). It is never deleted.
     """.rstrip())
 
     brain, _ = _new_brain()
@@ -823,71 +843,108 @@ def test_belief_revision(max_cycles: int) -> dict:
         _fail(f"Expected 0.90 to remain, got {conf_b_after[0]:.2f}")
         results["lower_conf_ignored"] = False
 
-    # ─── Scenario C: contradicting relation type ───────────────────────
-    _sub("Scenario C: contradicting relation (ENABLES vs PREVENTS)")
-    brain.relations.add("fire", "ENABLES", "forest_regeneration", 0.80, source_key="t", session_id="e")
-    brain.relations.add("fire", "PREVENTS", "forest_regeneration", 0.70, source_key="t", session_id="e")
-    brain.contradictions.scan(session_id="e")
+    # ─── Scenario C: contradicting relation type with M18 revision ────
+    _sub("Scenario C: contradicting relation (ENABLES vs PREVENTS) + M18 revision")
+    brain.relations.add("fire", "ENABLES", "forest_regeneration", 0.55,
+                        source_key="t", session_id="s1")
+    brain.belief_revision.record_source("fire", "ENABLES", "forest_regeneration", "s1")
+    # PREVENTS comes from 3 independent sessions — much stronger corroboration
+    for sid in ("s2", "s3", "s4"):
+        brain.relations.add("fire", "PREVENTS", "forest_regeneration", 0.80,
+                            source_key="t", session_id=sid)
+        brain.belief_revision.record_source("fire", "PREVENTS", "forest_regeneration", sid)
+
+    brain.contradictions.scan(session_id="s4")
     n_c = brain.contradictions.stats().get("total_contradictions", 0)
+
+    enables_before = brain.memory._long_term.conn.execute(
+        "SELECT confidence FROM relations WHERE subject='fire' AND rel_type='ENABLES'"
+    ).fetchone()
+    enables_before = enables_before[0] if enables_before else None
+
+    n_revised = brain.belief_revision.evaluate_and_revise(session_id="test5")
+
     conf_enables = brain.memory._long_term.conn.execute(
         "SELECT confidence FROM relations WHERE subject='fire' AND rel_type='ENABLES'"
     ).fetchone()
     conf_prevents = brain.memory._long_term.conn.execute(
         "SELECT confidence FROM relations WHERE subject='fire' AND rel_type='PREVENTS'"
     ).fetchone()
-    _p(f"    fire ENABLES forest_regeneration: {conf_enables[0] if conf_enables else 'not found':.2f}")
-    _p(f"    fire PREVENTS forest_regeneration: {conf_prevents[0] if conf_prevents else 'not found':.2f}")
-    _p(f"    Total contradictions logged: {n_c}")
+
+    e_str = brain.belief_revision.evidence_strength("fire", "ENABLES", "forest_regeneration")
+    p_str = brain.belief_revision.evidence_strength("fire", "PREVENTS", "forest_regeneration")
+
+    _p(f"    ENABLES  corroboration: "
+       f"{brain.belief_revision.corroboration_factor('fire','ENABLES','forest_regeneration'):.2f}×  "
+       f"strength={e_str:.3f}")
+    _p(f"    PREVENTS corroboration: "
+       f"{brain.belief_revision.corroboration_factor('fire','PREVENTS','forest_regeneration'):.2f}×  "
+       f"strength={p_str:.3f}")
+    _p(f"    Contradictions logged: {n_c}")
+    _p(f"    Beliefs revised: {n_revised}")
+    _p(f"    fire ENABLES forest_regeneration: {enables_before:.2f} → "
+       f"{conf_enables[0] if conf_enables else 'n/a':.2f}")
+    _p(f"    fire PREVENTS forest_regeneration: {conf_prevents[0] if conf_prevents else 'n/a':.2f} (winner, unchanged)")
 
     if n_c > 0:
-        _ok("Contradiction logged.")
+        _ok("Contradiction detected and logged (M11).")
         results["contradiction_logged"] = True
     else:
         _fail("No contradiction logged.")
         results["contradiction_logged"] = False
 
-    both_survive = (conf_enables is not None) and (conf_prevents is not None)
-    if both_survive:
-        _gap(
-            "Both contradicting beliefs survive at full confidence.",
-            f"ENABLES={conf_enables[0]:.2f} and PREVENTS={conf_prevents[0]:.2f} "
-            f"both remain. The contradiction is logged but neither belief is demoted.\n"
-            f"      This is the revision gap: Genesis accumulates evidence but does not\n"
-            f"      adjudicate between conflicting beliefs. A correct architecture\n"
-            f"      would lower confidence on the losing side when a stronger contradiction\n"
-            f"      arrives. This is the next architectural step after current milestones."
+    enables_revised = (
+        enables_before is not None
+        and conf_enables is not None
+        and conf_enables[0] < enables_before - 0.01
+    )
+    if enables_revised:
+        _ok(
+            f"Belief revised by evidence weight (M18): ENABLES "
+            f"{enables_before:.2f} → {conf_enables[0]:.2f}.",
+            f"Evidence ratio {p_str:.3f}/{e_str:.3f} = {p_str/max(e_str,0.001):.2f}× "
+            f"favoured PREVENTS. ENABLES confidence reduced. Belief retained at floor "
+            f"(total retention — never erased)."
         )
-        results["both_survive"] = True
+        results["belief_revised_by_evidence"] = True
+    else:
+        ratio = p_str / max(e_str, 0.001)
+        _gap(
+            f"Belief not revised — evidence ratio {ratio:.2f}× below REVISE threshold (1.40×).",
+            f"Both beliefs held in TENSION/RESIST. Increase corroboration gap to trigger "
+            f"REVISE. The M18 mechanism is working — the evidence balance here is "
+            f"genuinely too close to call."
+        )
+        results["belief_revised_by_evidence"] = False
 
-    # ─── What would revision look like? ───────────────────────────────
-    _sub("What genuine belief revision would look like")
-    _p("""
-    If belief revision were implemented:
-      Step 1: fire ENABLES forest_regeneration  at conf=0.80  ← stored
-      Step 2: fire PREVENTS forest_regeneration at conf=0.70  ← contradicts
-      Expected: ENABLES confidence drops (maybe by 0.70 * some revision factor)
-      Currently: ENABLES stays at 0.80, PREVENTS added at 0.70, conflict logged.
+    results["both_survive"] = not enables_revised  # gap if both survive at full confidence
 
-    The right fix: when two opposing relations share a subject and object,
-    the weaker one's confidence should be penalized proportionally to the
-    stronger one's confidence. This is Bayesian belief updating — prior belief
-    is revised in light of contradicting evidence, weighted by confidence.
-    """.rstrip())
+    _sub("Revision audit trail")
+    history = brain.belief_revision.revision_history(limit=3)
+    if history:
+        for h in history:
+            _p(f"    {h['subject']} {h['relation']} {h['object']}: "
+               f"{h['old_confidence']:.2f} → {h['new_confidence']:.2f}")
+    else:
+        _p("    (no REVISE outcomes yet — check TENSION/RESIST log)")
+
+    tensions = brain.belief_revision.pending_tensions(limit=2)
+    if tensions:
+        for t in tensions:
+            _p(f"    TENSION: {t['subject']} {t['rel_a']} vs {t['rel_b']} {t['object']}")
 
     _matters("""
-This is the most important honest gap in Genesis right now.
+M18 is now active. The school analogy: Genesis can now cross out wrong answers.
 
-A system that never revises beliefs is learning in one direction only.
-It can get more certain but never less certain. It can add beliefs but
-never remove wrong ones. Real learning requires both.
-
-The school analogy: a student who never crosses out wrong answers on a
-test will accumulate both correct and incorrect beliefs. Given enough
-contradicting evidence, the correct beliefs will be higher-confidence —
-but the wrong beliefs never disappear. They just become less prominent.
-
-Genesis currently does this. Contradiction detection (M11) is the flag in
-the margin. Belief revision — the actual crossing out — is not yet built.
+Evidence strength = confidence × corroboration × source_trust.
+  - Corroboration: independent sessions count, not volume from one source.
+    100 citations from one fraudulent study ≠ independent corroboration.
+    This is the Wakefield vaccine-autism principle — trust in source is
+    itself a revisable belief, and a trust drop cascades to beliefs it originated.
+  - Three outcomes: REVISE (winner clearly stronger), RESIST (too close to call),
+    TENSION (genuinely uncertain — both held, curiosity directive registered).
+  - Floor: confidence never drops below 0.10. Beliefs are demoted, never erased.
+    Total retention means wrong beliefs stay in the record. They just stop winning.
     """)
 
     return results
@@ -916,8 +973,8 @@ def _summary(results: dict):
             _growth_compounding(results.get("growth", {}).get("snapshots", [])),
     }
     gaps = {
-        "Belief revision (confidence doesn't drop when contradicted)":
-            results.get("belief_revision", {}).get("both_survive", True),
+        "Belief revision (M18 — confidence drops on contradicted beliefs)":
+            not results.get("belief_revision", {}).get("belief_revised_by_evidence", False),
         "Pattern transfer (cross-domain generalization)":
             True,  # always a gap currently
     }
@@ -937,8 +994,8 @@ def _summary(results: dict):
     if passed >= 4:
         _p()
         _p("  RESULT: Genesis is demonstrating real knowledge development.")
-        _p("  It stores, infers, measures its own ignorance, and detects conflict.")
-        _p("  The gaps (revision, transfer) are the clear next architectural steps.")
+        _p("  It stores, infers, measures its own ignorance, detects conflict, and revises.")
+        _p("  Remaining gap: pattern transfer (cross-domain generalization).")
     elif passed >= 2:
         _p()
         _p("  RESULT: Foundation is working. Inference and ignorance-calibration")

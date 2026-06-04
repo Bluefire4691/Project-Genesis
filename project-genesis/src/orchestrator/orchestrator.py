@@ -116,6 +116,12 @@ class Orchestrator:
         from interface.observer_calibration import ObserverCalibration
         self._calibration = ObserverCalibration(_conn)
 
+        # M18: Belief revision — evidence-weighted contradiction resolution.
+        # Tracks corroboration provenance and source trust; revises confidences
+        # when stronger independent evidence contradicts existing beliefs.
+        from cognition.belief_revision import BeliefRevision
+        self.belief_revision = BeliefRevision(_conn)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -499,6 +505,10 @@ class Orchestrator:
                     session_id=self.session_id,
                 ):
                     relations_added += 1
+                    self.belief_revision.record_source(
+                        rel["subject"], rel["relation"], rel["object"],
+                        self.session_id,
+                    )
 
         # Contradiction scan after any new relations are added
         new_conflicts = 0
@@ -506,6 +516,13 @@ class Orchestrator:
             new_conflicts = self.contradictions.scan(session_id=self.session_id)
             if new_conflicts > 0 and self.survival.can("logging"):
                 self._log(f"  ⚡ {new_conflicts} new contradiction(s) detected")
+            # M18: evaluate contradictions and revise beliefs by evidence strength
+            if new_conflicts > 0:
+                revised = self.belief_revision.evaluate_and_revise(
+                    session_id=self.session_id
+                )
+                if revised > 0 and self.survival.can("logging"):
+                    self._log(f"  ✏️  {revised} belief(s) revised by evidence weight")
 
         return stored_keys, new_conflicts
 
