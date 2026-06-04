@@ -594,11 +594,15 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                     pass
                 last_save = now
 
-            # ── 5. Quiet foreground pulse so the chat window feels alive ─
+            # ── 5. Liveness pulse → the thought log, NOT the typing window ─
+            # The chat terminal must never emit unsolicited output: a stdin
+            # reader thread is blocked on input() here, and any print() from
+            # the main thread lands in the middle of whatever the user is
+            # typing. Liveness belongs in the second (thought-log) window,
+            # which is exactly what it's for.
             if now - last_pulse >= _PULSE_INTERVAL:
                 rel_count = brain.relations.stats().get("total_relations", 0)
-                print(f"\r  · still here — thinking ({cycles} cycles, "
-                      f"{rel_count} relations). type anytime.", flush=True)
+                think.write(f"· still here — {cycles} cycles, {rel_count} relations")
                 last_pulse = now
 
             time.sleep(_CYCLE_SLEEP)
