@@ -1,0 +1,61 @@
+
+╔════════════════════════════════════════════════════════════════╗
+║                GENESIS RESEARCH EVALUATION SUITE               ║
+║       2026-06-04 14:20  |  Mode: QUICK  |  60 cycles/batch     ║
+╚════════════════════════════════════════════════════════════════╝
+
+  This suite observes whether Genesis behaves like an entity:
+  does it develop, remember, self-direct, and diverge?
+  Not pass/fail — behavioral observations with interpretation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  EXPERIMENT 2: CROSS-SESSION CONTINUITY
+  Does Genesis pick up where it left off, or effectively restart?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Run Genesis through a session, save it, restore it in a new session.
+  Check whether it remembers: its cycle count, working memory, curiosity
+  directives, and reflection history. Then run more cycles and check that
+  it builds on prior state rather than re-learning from zero.
+
+  ── Session 1
+    End of session 1:
+      Cycles: 60
+      Working memory items: 15
+      Relations: 8
+      Reflections recorded: 1
+      Curiosity directives: 11
+      Salient concepts: ['wolves', 'deer', 'deer populations', 'apex predators', 'trophic cascade']
+
+  ── Session 2 (restored from same DB)
+    Start of session 2:
+      Restored cycle count: 60  (was 60)
+      Working memory items: 15  (was 15)
+      Directives loaded: 11  (probe present: True)
+      Reflection history still present: True
+      Salient still: ['wolves', 'deer', 'deer populations', 'apex predators', 'trophic cascade']
+
+  ── Continuity checks
+    ✓  cycle count restored
+    ✓  working memory warm
+    ✓  directives persisted
+    ✓  reflection history present
+    ✓  continued learning in s2
+    ✓  salient overlap
+
+  ✅  FINDING: Strong continuity: 6/6 checks passed.
+      Genesis remembered its prior session and continued from it.
+
+  WHY THIS MATTERS:
+    Continuity is one of three properties that distinguish an entity from a tool.
+    A tool resets between uses. An entity has a history that persists.
+    
+    If checks pass: Genesis genuinely has a cross-session identity. Its cycle count,
+    working memory, directives, and reflection history survive the shutdown/restart
+    boundary. It knows what it was thinking about before it was turned off.
+    
+    If checks fail: there's a persistence gap somewhere — something important is
+    being dropped between sessions. The system technically works but doesn't carry
+    itself forward.
+
+  Experiment completed in 0.3s
