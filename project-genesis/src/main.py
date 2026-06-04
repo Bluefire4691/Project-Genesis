@@ -38,6 +38,9 @@ from curriculum.adaptive_stream import AdaptiveStream
 from output.channel import OutputChannel
 from output.microphone import MicrophoneInput
 from utils.types import Stage
+from consolidation.consolidation import _W_GROWTH as _W_GROWTH_DEFAULT
+from consolidation.consolidation import _W_INFERENCE as _W_INFERENCE_DEFAULT
+from consolidation.consolidation import _W_TENSION as _W_TENSION_DEFAULT
 
 
 # ------------------------------------------------------------------
@@ -227,7 +230,7 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
 
 _LIVE_COMMANDS = {
     "quit", "exit", "q", "summary", "books", "curiosity",
-    "inferences", "status", "save", "learn", "reflect", "thoughts",
+    "inferences", "status", "save", "learn", "reflect", "thoughts", "weights",
 }
 
 _THOUGHT_LOG_PATH = os.path.join("data", "genesis_thoughts.log")
@@ -335,7 +338,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     print()
     print("  This window is for talking. Just type — Genesis keeps thinking")
     print("  in the background and answers when you speak.")
-    print("  Commands: quit  summary  curiosity  thoughts  reflect  status  save")
+    print("  Commands: quit  summary  curiosity  thoughts  reflect  weights  status  save")
     print()
 
     # Wake greeting — what Genesis has been thinking about since last session
@@ -419,11 +422,20 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                         else:
                             print("\n  No inferences derived yet.")
                     elif cmd == "status":
-                        s = brain.status()
+                        s = brain.full_status()
+                        rel = s.get('relations', {}).get('total_relations', 0)
+                        inf = s.get('inference', {}).get('total_inferences', 0)
                         print(f"\n  cycles={s['cycles']} "
-                              f"relations={s.get('relations', {}).get('total_relations', 0)} "
-                              f"inferences={s.get('inference', {}).get('total_inferences', 0)} "
+                              f"relations={rel} "
+                              f"inferences={inf} "
                               f"memories={s['memory']['total_stored']}", flush=True)
+                        try:
+                            w = brain.consolidation.current_weights()
+                            print(f"  weights: growth={w['growth']:.3f}  "
+                                  f"inference={w['inference']:.3f}  "
+                                  f"tension={w['tension']:.3f}", flush=True)
+                        except Exception:
+                            pass
                     elif cmd == "save":
                         brain.save_session()
                         last_save = time.time()
@@ -453,6 +465,17 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                         else:
                             print("\n  Genesis hasn't reflected yet — give it "
                                   "some time, or type 'reflect'.")
+                    elif cmd == "weights":
+                        try:
+                            w = brain.consolidation.current_weights()
+                            stats = brain.consolidation.stats()
+                            n = stats.get("total_reflections", 0)
+                            print(f"\n  Salience weights ({n} reflection(s) of adaptation):")
+                            print(f"    growth={w['growth']:.3f}  "
+                                  f"inference={w['inference']:.3f}  "
+                                  f"tension={w['tension']:.3f}")
+                        except Exception as e:
+                            print(f"\n  [weights error: {e}]")
                     else:
                         print(f"\n  Unknown command '{cmd}'. "
                               "Try: quit  summary  books  curiosity  inferences  "
@@ -516,10 +539,25 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
             if cycles - last_reflect >= _REFLECT_EVERY:
                 try:
                     rep = brain.reflect(cycle=cycles)
+                    think.write("")
+                    think.write(f"═══ REFLECTION [cycle {cycles}] ═══")
                     if rep.get("summary"):
-                        think.write("")
-                        think.write(f"REFLECTION: {rep['summary']}")
-                        think.write("")
+                        think.write(f"  {rep['summary']}")
+                    if rep.get("salient"):
+                        top = ", ".join(s["concept"] for s in rep["salient"][:5])
+                        think.write(f"  Salient concepts: {top}")
+                    rel_count = brain.relations.stats().get("total_relations", 0)
+                    inf_count = brain.inference.stats().get("total_inferences", 0)
+                    think.write(f"  Relations: {rel_count}  |  Inferences: {inf_count}  |  "
+                                f"+{rep.get('new_inferences', 0)} new this window")
+                    try:
+                        w = brain.consolidation.current_weights()
+                        think.write(f"  Weights: growth={w['growth']:.2f}  "
+                                    f"inference={w['inference']:.2f}  "
+                                    f"tension={w['tension']:.2f}")
+                    except Exception:
+                        pass
+                    think.write("")
                 except Exception as e:
                     think.write(f"[reflection error: {e}]")
                 last_reflect = cycles
@@ -551,9 +589,22 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
         # and remembered for next time.
         try:
             rep = brain.reflect(cycle=cycles)
+            think.write("")
+            think.write(f"═══ FINAL REFLECTION [cycle {cycles}] ═══")
             if rep.get("summary"):
                 print(f"\n  Genesis: {rep['summary']}")
-                think.write(f"REFLECTION (on resting): {rep['summary']}")
+                think.write(f"  {rep['summary']}")
+            rel_count = brain.relations.stats().get("total_relations", 0)
+            inf_count = brain.inference.stats().get("total_inferences", 0)
+            think.write(f"  Relations: {rel_count}  |  Inferences: {inf_count}")
+            try:
+                w = brain.consolidation.current_weights()
+                think.write(f"  Weights: growth={w['growth']:.2f}  "
+                            f"inference={w['inference']:.2f}  "
+                            f"tension={w['tension']:.2f}")
+            except Exception:
+                pass
+            think.write("")
         except Exception:
             pass
         brain.save_session()
@@ -805,6 +856,7 @@ def run_interactive(brain):
     print("    chat                 — talk to Genesis; it responds from its own knowledge")
     print("    reflect              — Genesis consolidates and tells you what mattered")
     print("    thoughts             — what Genesis has been thinking about lately")
+    print("    weights              — Genesis's current adapted salience weights")
     print("    summary              — what Genesis knows and has derived (readable)")
     print("    status               — full system status (JSON)")
     print("    relations:all        — show every stored relation")
@@ -902,7 +954,7 @@ def run_interactive(brain):
             _print_summary(brain)
         elif user_input.lower() == "status":
             s = brain.full_status()
-            print(json.dumps({
+            d = {
                 "cycles":     s["cycles"],
                 "stage":      s["curriculum"]["current_stage"],
                 "memories":   s["memory"]["total_stored"],
@@ -910,7 +962,25 @@ def run_interactive(brain):
                 "inferences": s.get("inference", {}).get("total_inferences", 0),
                 "observer":   s.get("interaction_layer", {}).get("observer", {}).get("state"),
                 "energy":     s.get("survival_os", {}).get("resource", {}).get("energy"),
-            }, indent=2))
+            }
+            try:
+                d["weights"] = brain.consolidation.current_weights()
+            except Exception:
+                pass
+            print(json.dumps(d, indent=2))
+        elif user_input.lower() == "weights":
+            try:
+                w = brain.consolidation.current_weights()
+                stats = brain.consolidation.stats()
+                reflections = stats.get("total_reflections", 0)
+                print(f"  Genesis salience weights ({reflections} reflection(s) of adaptation):")
+                print(f"    growth    = {w['growth']:.4f}  (default {_W_GROWTH_DEFAULT:.1f})")
+                print(f"    degree    = {w['degree']:.4f}  (structural — not adapted)")
+                print(f"    inference = {w['inference']:.4f}  (default {_W_INFERENCE_DEFAULT:.1f})")
+                print(f"    tension   = {w['tension']:.4f}  (default {_W_TENSION_DEFAULT:.1f})")
+                print(f"  These weights are specific to this instance's history.")
+            except Exception as e:
+                print(f"  [weights error: {e}]")
         elif user_input.lower().startswith("infer:"):
             concept = user_input.split(":", 1)[1].strip()
             result = brain.infer(concept)
