@@ -106,6 +106,12 @@ class GenesisVoice:
         self._expressions_total: int = 0
         self._last_statement: str = ""
 
+        # Within-session conversation log.
+        # Each entry: {role: "user"|"genesis", text: str, concepts: set[str]}
+        # Kept short (last N turns) — this is session working memory, not persistence.
+        self._conversation: list[dict] = []
+        self._CONVO_MAX: int = 12  # last N turns
+
     # ------------------------------------------------------------------
     # Primary interface
     # ------------------------------------------------------------------
@@ -243,9 +249,11 @@ class GenesisVoice:
           - mentions a concept it knows          → what it has worked out about it
           - tells it something new               → it takes it in, then shares a
                                                     thought or a question of its own
+          - follow-up ("tell me more", "and?")   → continues from the prior topic
 
         Everything is drawn from clean sources (the relation graph, inferences,
         reflections) — no mangled memory keys, no raw relation-type tokens.
+        Within-session conversational memory ensures Genesis tracks the thread.
         """
         # Always learn from what was said.
         result = self._brain.process_input("text", user_text)
@@ -253,26 +261,43 @@ class GenesisVoice:
         wm_delta = result.get("wm_delta", 0)
 
         text = user_text.lower().strip()
+        concepts = self._extract_input_concepts(user_text)
+
+        # Log the user turn before routing
+        self._log_turn("user", user_text, set(concepts))
 
         # ── Intent: open questions about Genesis's own mind ──────────────
         if re.match(r"^\s*(hi|hello|hey|yo|hiya|greetings|howdy|"
                     r"good\s+(morning|afternoon|evening))\b", text):
-            return f"Hello. {self._say_thoughts()}"
+            reply = f"Hello. {self._say_thoughts()}"
+            return self._log_and_return(reply, set())
 
         if re.search(r"think(ing)?\s+about|on your mind|what.*you.*think|"
                      r"been thinking|been up to|what'?s new", text):
-            return self._say_thoughts()
+            reply = self._say_thoughts()
+            return self._log_and_return(reply, set())
 
         if re.search(r"curious|want to learn|wonder(ing)?|like to know|"
                      r"trying to (learn|understand|figure)", text):
-            return self._say_curiosity()
+            reply = self._say_curiosity()
+            return self._log_and_return(reply, set())
 
         if re.search(r"what do you know|what have you learned|what do you "
                      r"understand|tell me what you know|how much do you know", text):
-            return self._say_knowledge_overview()
+            reply = self._say_knowledge_overview()
+            return self._log_and_return(reply, set())
+
+        # ── Follow-up: user is continuing from a prior topic ─────────────
+        if self._is_followup(text, concepts):
+            prior_concepts = self._recent_concepts(roles={"genesis"}, turns=3)
+            if prior_concepts:
+                target = next(iter(prior_concepts))
+                stmt = self._compose_about(target)
+                if stmt:
+                    reply = f"Building on that — {stmt}"
+                    return self._log_and_return(reply, {target})
 
         # ── Intent: about a specific concept it knows ───────────────────
-        concepts = self._extract_input_concepts(user_text)
         parts: list[str] = []
         for concept in concepts[:2]:
             stmt = self._compose_about(concept)
@@ -283,7 +308,8 @@ class GenesisVoice:
             follow = self._curiosity_question(exclude=set(concepts))
             if follow and len(parts) < 2:
                 parts.append(follow)
-            return " ".join(parts)
+            reply = " ".join(parts)
+            return self._log_and_return(reply, set(concepts))
 
         # ── New / unfamiliar input ──────────────────────────────────────
         if novel or wm_delta > 0:
@@ -291,7 +317,8 @@ class GenesisVoice:
         else:
             opener = "I've heard things like that before."
         thread = self._curiosity_question() or self._say_thoughts()
-        return f"{opener} {thread}".strip()
+        reply = f"{opener} {thread}".strip()
+        return self._log_and_return(reply, set())
 
     # ------------------------------------------------------------------
     # Conversational helpers — grounded, clean, first-person
@@ -346,6 +373,70 @@ class GenesisVoice:
             if self._is_clean(c) and c not in out:
                 out.append(c)
         return out
+
+    # ------------------------------------------------------------------
+    # Conversational memory helpers
+    # ------------------------------------------------------------------
+
+    def _log_turn(self, role: str, text: str, concepts: set) -> None:
+        """Append a turn to the within-session conversation log."""
+        self._conversation.append({"role": role, "text": text, "concepts": concepts})
+        if len(self._conversation) > self._CONVO_MAX:
+            self._conversation = self._conversation[-self._CONVO_MAX:]
+
+    def _log_and_return(self, reply: str, concepts: set) -> str:
+        """Log Genesis's reply turn and return it."""
+        self._log_turn("genesis", reply, concepts)
+        return reply
+
+    def _recent_concepts(self, roles: Optional[set] = None,
+                         turns: int = 4) -> set:
+        """
+        Return concepts mentioned in the most recent `turns` turns.
+
+        roles: if given, only look at turns from those roles.
+        """
+        recent = self._conversation[-turns:] if self._conversation else []
+        out: set = set()
+        for entry in recent:
+            if roles and entry["role"] not in roles:
+                continue
+            out.update(entry["concepts"])
+        return out
+
+    def _is_followup(self, text: str, concepts: list) -> bool:
+        """
+        Return True if the message looks like a continuation of the prior topic.
+
+        Two cases:
+          1. Explicit follow-up phrase ("tell me more", "what about that", "and?")
+          2. The user mentions a concept that Genesis talked about in the last 2 turns,
+             without adding new concepts (narrowing down rather than changing subject)
+        """
+        # Explicit follow-up phrases
+        followup_re = re.compile(
+            r"^\s*(tell me more|more about (that|this)|go on|continue|"
+            r"what else|and\??|interesting|really\??|oh\??|hm+\??|"
+            r"what about (that|it|them|this)|expand on|elaborate|"
+            r"keep going|so what|then what|why is that|how so)\b",
+            re.IGNORECASE,
+        )
+        if followup_re.match(text):
+            return True
+
+        # Concept overlap with genesis's recent replies
+        if concepts:
+            genesis_recent = self._recent_concepts(roles={"genesis"}, turns=2)
+            user_concepts = set(concepts)
+            # User is asking about something Genesis just mentioned
+            if user_concepts & genesis_recent and len(user_concepts) <= 2:
+                return True
+
+        return False
+
+    def conversation_log(self) -> list[dict]:
+        """The current within-session conversation history."""
+        return list(self._conversation)
 
     def _say_knowledge_overview(self) -> str:
         """An honest account of what Genesis knows: a reflection, an example, a scale."""
@@ -675,9 +766,10 @@ class GenesisVoice:
 
     def stats(self) -> dict:
         return {
-            "expressions_total": self._expressions_total,
-            "last_expressed_at": self._last_expressed_at,
-            "last_statement":    self._last_statement[:80] if self._last_statement else "",
-            "channel":           self._channel.name,
-            "expression_rate":   self._expression_rate,
+            "expressions_total":    self._expressions_total,
+            "last_expressed_at":    self._last_expressed_at,
+            "last_statement":       self._last_statement[:80] if self._last_statement else "",
+            "channel":              self._channel.name,
+            "expression_rate":      self._expression_rate,
+            "conversation_turns":   len(self._conversation),
         }
