@@ -230,7 +230,7 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
 
 _LIVE_COMMANDS = {
     "quit", "exit", "q", "summary", "books", "curiosity",
-    "inferences", "status", "save", "learn", "reflect", "thoughts", "weights",
+    "inferences", "status", "save", "learn", "reflect", "thoughts", "history", "weights",
 }
 
 _THOUGHT_LOG_PATH = os.path.join("data", "genesis_thoughts.log")
@@ -338,7 +338,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     print()
     print("  This window is for talking. Just type — Genesis keeps thinking")
     print("  in the background and answers when you speak.")
-    print("  Commands: quit  summary  curiosity  thoughts  reflect  weights  status  save")
+    print("  Commands: quit  summary  curiosity  thoughts  history  reflect  weights  status  save")
     print()
 
     # Wake greeting — what Genesis has been thinking about since last session
@@ -465,6 +465,26 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                         else:
                             print("\n  Genesis hasn't reflected yet — give it "
                                   "some time, or type 'reflect'.")
+                    elif cmd == "history":
+                        entries = brain.consolidation.history(limit=12)
+                        if not entries:
+                            print("\n  Genesis hasn't reflected yet — no history.")
+                        else:
+                            entries = list(reversed(entries))
+                            print(f"\n  Genesis's thinking across {len(entries)} reflection(s):\n")
+                            for i, e in enumerate(entries, 1):
+                                salient = e.get("salient", [])
+                                concepts = ", ".join(
+                                    s["concept"] if isinstance(s, dict) else str(s)
+                                    for s in salient[:6]
+                                )
+                                ts = e.get("created_at", "")[:16].replace("T", " ")
+                                arrow = "→" if i < len(entries) else "■"
+                                print(f"  {arrow} [{i}] {ts}  —  {concepts or '(none)'}")
+                            print()
+                            latest_summary = entries[-1].get("summary", "")
+                            if latest_summary:
+                                print(f"  Most recent: {latest_summary}")
                     elif cmd == "weights":
                         try:
                             w = brain.consolidation.current_weights()
@@ -479,7 +499,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                     else:
                         print(f"\n  Unknown command '{cmd}'. "
                               "Try: quit  summary  books  curiosity  inferences  "
-                              "status  save  learn  reflect  thoughts")
+                              "status  save  learn  reflect  thoughts  history")
                     print(flush=True)
 
                 else:
@@ -856,6 +876,7 @@ def run_interactive(brain):
     print("    chat                 — talk to Genesis; it responds from its own knowledge")
     print("    reflect              — Genesis consolidates and tells you what mattered")
     print("    thoughts             — what Genesis has been thinking about lately")
+    print("    history              — how Genesis's thinking has evolved across reflections")
     print("    weights              — Genesis's current adapted salience weights")
     print("    summary              — what Genesis knows and has derived (readable)")
     print("    status               — full system status (JSON)")
@@ -898,6 +919,28 @@ def run_interactive(brain):
                 print(f"  {latest['summary']}")
             else:
                 print("  Genesis hasn't reflected yet. Try 'reflect'.")
+        elif user_input.lower() == "history":
+            entries = brain.consolidation.history(limit=12)
+            if not entries:
+                print("  Genesis hasn't reflected yet — no history to show.")
+            else:
+                # Reverse to show oldest first (chronological evolution)
+                entries = list(reversed(entries))
+                print(f"  Genesis's thinking across {len(entries)} reflection(s):\n")
+                for i, e in enumerate(entries, 1):
+                    salient = e.get("salient", [])
+                    concepts = ", ".join(
+                        s["concept"] if isinstance(s, dict) else str(s)
+                        for s in salient[:6]
+                    )
+                    ts = e.get("created_at", "")[:16].replace("T", " ")
+                    arrow = "→" if i < len(entries) else "■"
+                    print(f"  {arrow} [{i}] {ts}  —  {concepts or '(no salient concepts)'}")
+                print()
+                # Show the most recent summary as a capstone
+                latest_summary = entries[-1].get("summary", "")
+                if latest_summary:
+                    print(f"  Most recent: {latest_summary}")
         elif user_input.lower() == "express":
             _show_expression(brain)
         elif user_input.lower() == "voice":

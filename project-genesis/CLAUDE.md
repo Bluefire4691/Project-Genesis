@@ -145,6 +145,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | — | ✅ | Adaptive weights: consolidation engine tunes its own salience formula per instance |
 | — | ✅ | Conversational memory: within-session topic tracking; follow-up detection and response |
 | — | ✅ | Reasoning chains: inferences show derivation path ("runs through X → Y"); "what are you up to?" intent |
+| — | ✅ | Interest history: `history` command shows evolution of salient concepts across all reflections |
 
 ---
 
@@ -180,7 +181,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 - **Never test implementation details of lower layers from higher-layer tests.** Test M1
   in `test_survival_*.py`. Test M4 in `test_orchestrator.py`. Don't reach across layers.
 - Run full suite before committing: `python -m pytest` from `project-genesis/`.
-  Currently: **650 tests, all passing.**
+  Currently: **661 tests, all passing.**
 
 ---
 
