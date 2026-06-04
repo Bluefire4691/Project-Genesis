@@ -221,6 +221,10 @@ class KnowledgeFeeder:
         """Report Genesis's reading progress through Gutenberg books."""
         return self._gutenberg.reading_status()
 
+    def library(self) -> list[dict]:
+        """The local downloaded-book reference library."""
+        return self._gutenberg.library()
+
     def stats(self) -> dict:
         return {
             "total_topics_fetched":   self._total_topics_fetched,

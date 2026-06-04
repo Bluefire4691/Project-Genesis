@@ -30,9 +30,13 @@ from typing import Optional
 _GUTENDEX_API = "https://gutendex.com/books/"
 _CHUNK_CHARS = 4000          # ~650 words per reading session
 _MIN_BOOK_CHARS = 10_000     # ignore tiny texts
-_REQUEST_TIMEOUT = 5   # per attempt for actual book fetches
+_REQUEST_TIMEOUT = 60  # downloading a full book — multi-MB texts need real time
 _AVAILABILITY_TIMEOUT = 3  # quick probe — fail fast when offline
 _RETRY_DELAY = 1
+# After a failed network probe, wait this long before trying the network
+# again instead of latching "offline" for the entire session. A single
+# transient failure must not permanently disable book fetching.
+_OFFLINE_COOLDOWN = 300.0  # seconds
 
 _HEADERS = {
     "User-Agent": (
@@ -89,12 +93,20 @@ class GutenbergFetcher:
     """
 
     def __init__(self, cache_dir: str = "data/book_cache",
-                 positions_file: str = "data/reading_positions.json"):
+                 positions_file: str = "data/reading_positions.json",
+                 index_file: str = "data/book_index.json"):
         self._cache_dir = Path(cache_dir)
         self._positions_file = Path(positions_file)
+        self._index_file = Path(index_file)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._positions: dict[str, int] = self._load_positions()
+        # Persistent local library index: book_id -> {title, topics:[...]}.
+        # Every downloaded book is recorded here so it becomes part of a
+        # growing local reference corpus and can be rediscovered for related
+        # topics WITHOUT any network call.
+        self._index: dict[str, dict] = self._load_index()
         self._available: Optional[bool] = None  # None = not yet tested
+        self._last_probe_failed_at: float = 0.0  # for offline cooldown
 
     # ------------------------------------------------------------------
     # Public interface
@@ -104,17 +116,31 @@ class GutenbergFetcher:
         """
         Find a book relevant to the topic and return the next unread passage.
 
-        Returns (title, passage_text) or (None, None) if unavailable.
+        Cache-first: a book already in the local library is read with no network
+        access at all. Only when nothing local matches do we reach for the
+        network — and a failed reach triggers a cooldown, never a permanent
+        session-wide offline latch.
+
+        Returns (title, passage_text) or (None, None) if nothing is available.
         """
-        # Fast path: skip all network calls if we already know we're offline
-        if self._available is False:
+        # 1. Local library first — zero network. This is the reference corpus.
+        local = self._find_book_local(topic)
+        if local:
+            book_id, title = local
+            cache_file = self._cache_dir / f"{book_id}.txt"
+            book_text = cache_file.read_text(encoding="utf-8", errors="replace")
+            self._record_topic(book_id, title, topic)
+            passage = self._next_passage(book_id, book_text)
+            if passage:
+                return title, passage
+
+        # 2. Network discovery — only if we're not in an offline cooldown.
+        if not self._network_ok():
             return None, None
 
         book = self._find_book(topic)
         if not book:
-            # Mark offline after a failed search so future calls are instant
-            if self._available is None:
-                self._available = False
+            self._note_network_failure()
             return None, None
 
         book_id = str(book["id"])
@@ -125,7 +151,12 @@ class GutenbergFetcher:
 
         book_text = self._get_or_fetch_book(book_id, title, text_url)
         if not book_text:
+            self._note_network_failure()
             return None, None
+
+        # Record in the persistent library index so future related topics
+        # find this book locally without touching the network.
+        self._record_topic(book_id, title, topic)
 
         passage = self._next_passage(book_id, book_text)
         if not passage:
@@ -133,14 +164,76 @@ class GutenbergFetcher:
 
         return title, passage
 
+    def _network_ok(self) -> bool:
+        """
+        True if a network attempt is worth making. After a failure we back off
+        for _OFFLINE_COOLDOWN seconds rather than disabling the network for the
+        whole session.
+        """
+        if self._last_probe_failed_at == 0.0:
+            return True
+        return (time.time() - self._last_probe_failed_at) >= _OFFLINE_COOLDOWN
+
+    def _note_network_failure(self) -> None:
+        self._last_probe_failed_at = time.time()
+        self._available = False
+
+    def _find_book_local(self, topic: str) -> Optional[tuple[str, str]]:
+        """
+        Find an already-downloaded book matching the topic, from the local
+        index. Prefers a book Genesis has already started reading (continuity),
+        then any book whose recorded topics or title contain the query term.
+        Returns (book_id, title) or None. Never touches the network.
+        """
+        topic_l = topic.lower().strip()
+        if not topic_l:
+            return None
+
+        # Continuity: a book already in progress whose topics include this one
+        for book_id, meta in self._index.items():
+            if book_id in self._positions and topic_l in meta.get("topics", []):
+                if (self._cache_dir / f"{book_id}.txt").exists():
+                    return book_id, meta.get("title", "")
+
+        # Any cached book whose recorded topics or title match
+        for book_id, meta in self._index.items():
+            if not (self._cache_dir / f"{book_id}.txt").exists():
+                continue
+            topics = meta.get("topics", [])
+            title = meta.get("title", "").lower()
+            if topic_l in topics or topic_l in title:
+                return book_id, meta.get("title", "")
+
+        return None
+
+    def _record_topic(self, book_id: str, title: str, topic: str) -> None:
+        """Add (or update) a book in the persistent local library index."""
+        entry = self._index.setdefault(
+            book_id, {"title": title, "topics": []}
+        )
+        if title and not entry.get("title"):
+            entry["title"] = title
+        topic_l = topic.lower().strip()
+        if topic_l and topic_l not in entry["topics"]:
+            entry["topics"].append(topic_l)
+        self._save_index()
+
     @property
     def available(self) -> bool:
-        """Return True if gutendex.com is reachable. Cached after first probe."""
-        if self._available is None:
-            # Short single-attempt probe — fail fast when offline
-            data = _fetch_url(_GUTENDEX_API + "?search=nature",
-                              timeout=_AVAILABILITY_TIMEOUT, retries=1)
-            self._available = data is not None
+        """
+        True if gutendex.com is reachable. Re-probes after the offline cooldown
+        rather than caching a single failure for the whole session.
+        """
+        if self._available is True:
+            return True
+        if self._available is False and not self._network_ok():
+            return False
+        # Not yet probed, or cooldown elapsed — probe again.
+        data = _fetch_url(_GUTENDEX_API + "?search=nature",
+                          timeout=_AVAILABILITY_TIMEOUT, retries=1)
+        self._available = data is not None
+        if not self._available:
+            self._last_probe_failed_at = time.time()
         return self._available
 
     def reading_status(self) -> dict:
@@ -272,6 +365,34 @@ class GutenbergFetcher:
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
+
+    def _load_index(self) -> dict[str, dict]:
+        if self._index_file.exists():
+            try:
+                return json.loads(self._index_file.read_text())
+            except Exception:
+                pass
+        return {}
+
+    def _save_index(self) -> None:
+        try:
+            self._index_file.write_text(json.dumps(self._index, indent=2))
+        except Exception:
+            pass
+
+    def library(self) -> list[dict]:
+        """The local reference library: every downloaded book and its topics."""
+        out = []
+        for book_id, meta in self._index.items():
+            cached = (self._cache_dir / f"{book_id}.txt").exists()
+            out.append({
+                "book_id": book_id,
+                "title": meta.get("title", ""),
+                "topics": meta.get("topics", []),
+                "cached": cached,
+                "position": self._positions.get(book_id, 0),
+            })
+        return out
 
     def _load_positions(self) -> dict[str, int]:
         if self._positions_file.exists():
