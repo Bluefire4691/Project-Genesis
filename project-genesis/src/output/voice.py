@@ -363,17 +363,30 @@ class GenesisVoice:
             return None
 
     def _say_thoughts(self) -> str:
-        """What Genesis has been thinking about — from its latest reflection."""
+        """
+        What Genesis has been thinking about — grounded in retained prose.
+
+        For the top salient concept, surfaces an actual sentence from memory
+        rather than just naming the concept. This is the difference between
+        "I've been thinking about wolves" and "I've been thinking about wolves.
+        Wolves hunt deer."
+        """
         latest = self._latest_reflection()
         if latest and latest.get("summary"):
             return latest["summary"]
         names = [self._clean(c["concept"])
                  for c in self._brain.relations.most_connected(limit=6)
                  if self._is_clean(c["concept"])][:3]
-        if names:
-            return (f"Lately I've been building up what I know about "
-                    f"{self._english_list(names)}.")
-        return "I'm still early in my thinking — not much is on my mind yet."
+        if not names:
+            return "I'm still early in my thinking — not much is on my mind yet."
+        top = names[0]
+        prose = self._pull_prose_about(top.lower(), n=1)
+        if prose:
+            rest = (f" I've also been thinking about "
+                    f"{self._english_list(names[1:])}." if len(names) > 1 else "")
+            return f"Lately I've been thinking about {top}. {prose[0]}{rest}"
+        return (f"Lately I've been building up what I know about "
+                f"{self._english_list(names)}.")
 
     def _say_curiosity(self) -> str:
         """What Genesis genuinely wants to learn — from its curiosity frontier."""
@@ -674,7 +687,12 @@ class GenesisVoice:
         )
 
     def _compose_inference(self) -> Optional[str]:
-        """Express a transitive inference Genesis has derived."""
+        """
+        Express a transitive inference Genesis has derived.
+
+        When the subject concept is mature, weaves in actual retained prose
+        to ground the inference in language Genesis has processed.
+        """
         top = self._brain.inference.top_inferences(limit=20)
         if not top:
             return None
@@ -682,9 +700,28 @@ class GenesisVoice:
         chain = self._brain.inference.chain_for(
             entry["subject"], entry["relation"], entry["object"]
         )
-        subj = entry["subject"].replace("_", " ")
+        subj_raw = entry["subject"]
+        subj = subj_raw.replace("_", " ")
         obj = entry["object"].replace("_", " ")
         verb = _REL_VERBS.get(entry["relation"], entry["relation"].lower())
+        verb_base = _REL_VERBS_BASE.get(entry["relation"], entry["relation"].lower())
+
+        # When we have prose, ground the inference in actual language
+        stage = self._stage_for_concept(subj_raw.lower())
+        if stage >= 2:
+            prose = self._pull_prose_about(subj_raw.lower(), n=1)
+            if prose:
+                if chain and len(chain) >= 2:
+                    middle = chain[len(chain) // 2]["to"].replace("_", " ")
+                    return (
+                        f"{prose[0]} "
+                        f"From this, I've worked out that {subj} appears to "
+                        f"{verb_base} {obj} — the connection runs through {middle}."
+                    )
+                return (
+                    f"{prose[0]} "
+                    f"From this, I've worked out that {subj} appears to {verb_base} {obj}."
+                )
 
         if chain and len(chain) >= 2:
             middle = chain[len(chain) // 2]["to"].replace("_", " ")
@@ -763,11 +800,83 @@ class GenesisVoice:
             "I don't yet know what to make of it."
         )
 
+    def _stage_for_concept(self, concept: str) -> int:
+        """
+        0 = barely known, 1 = single sentence, 2 = few sentences,
+        3 = fluent (prose + inference).
+
+        Stage grows as Genesis processes more text about the concept.
+        """
+        try:
+            results = self._brain.memory.search(concept, top_k=20)
+            mem_count = sum(
+                1 for _k, m in results
+                if concept in (m.content + m.context).lower()
+            )
+        except Exception:
+            mem_count = 0
+        try:
+            rel_data = self._brain.relations.query_concept(concept, min_confidence=0.4)
+            rel_count = (len(rel_data.get("as_subject", []))
+                         + len(rel_data.get("as_object", [])))
+        except Exception:
+            rel_count = 0
+        total = mem_count + rel_count
+        if total < 2:
+            return 0
+        elif total < 6:
+            return 1
+        elif total < 15:
+            return 2
+        else:
+            return 3
+
+    def _pull_prose_about(self, concept: str, n: int = 3) -> list[str]:
+        """
+        Return up to n actual retained sentences from memory that mention concept.
+
+        The original prose is stored in the content field before the '|' separator.
+        Only complete, clean sentences are returned — no raw relation tokens.
+        """
+        try:
+            results = self._brain.memory.search(concept, top_k=20)
+        except Exception:
+            return []
+        seen: set = set()
+        sentences: list[str] = []
+        for _key, mem in results:
+            raw = mem.content.split("|")[0].strip() if mem.content else ""
+            for s in re.split(r'(?<=[.!?])\s+', raw):
+                s = s.strip()
+                if (concept in s.lower()
+                        and 15 <= len(s) <= 250
+                        and s not in seen
+                        and s[:1].isupper()
+                        and not any(tok in s for tok in
+                                    ["IS_A", "CAUSES", "CONTAINS", "PREDATES",
+                                     "REQUIRES", "CONTROLS", "ENABLES",
+                                     "PREVENTS", "AFFECTS"])):
+                    seen.add(s)
+                    sentences.append(s)
+                    if len(sentences) >= n:
+                        return sentences
+        return sentences
+
     def _compose_about(self, concept: str) -> Optional[str]:
-        """Compose a statement specifically about a named concept."""
+        """
+        Compose a statement about a concept at the right maturity stage.
+
+        Stage 0 — barely known: acknowledge it without pretending depth
+        Stage 1 — single-sentence: echo one retained prose sentence
+        Stage 2 — several sentences: prose + one derived relation
+        Stage 3 — fluent: prose + inference chain narration
+
+        The language is always drawn from what Genesis actually processed,
+        not from fill-in-the-blank templates. Expression grows as understanding grows.
+        """
         norm = concept.lower().strip()
 
-        # Check contradictions first
+        # Contradictions surface first — they are the most epistemically interesting
         conflicts = self._brain.contradictions.query_concept(norm)
         if conflicts:
             c = conflicts[0]
@@ -779,44 +888,72 @@ class GenesisVoice:
                 f"but it also {verb_b} {c['object'].replace('_', ' ')}."
             )
 
-        # Check inferences
+        stage = self._stage_for_concept(norm)
+
+        # Stage 0: barely encountered
+        if stage == 0:
+            outgoing = self._brain.relations.query_subject(norm, min_confidence=0.4)
+            if outgoing and self._is_clean(outgoing[0].get("object", "")):
+                obj = self._clean(outgoing[0]["object"])
+                return f"{norm}... {obj}."
+            return f"I've encountered {norm} but haven't formed much understanding yet."
+
+        prose = self._pull_prose_about(norm, n=3)
+
+        # Stage 1: one sentence
+        if stage == 1:
+            if prose:
+                return prose[0]
+            # Fallback to direct relation
+            outgoing = self._brain.relations.query_subject(norm, min_confidence=0.5)
+            if outgoing:
+                rel = outgoing[0]
+                verb = _REL_VERBS.get(rel["relation"], rel["relation"].lower())
+                obj = self._clean(rel["object"])
+                if self._is_clean(obj):
+                    return f"{norm} {verb} {obj}."
+            return None
+
+        # Stage 2: prose sentences + one derived relation
+        parts: list[str] = list(prose[:2])
+
+        outgoing = self._brain.relations.query_subject(norm, min_confidence=0.6)
+        clean_out = [r for r in outgoing if self._is_clean(r["object"])]
+        if clean_out and (not parts or self._clean(clean_out[0]["object"]) not in
+                          " ".join(parts).lower()):
+            rel = clean_out[0]
+            verb = _REL_VERBS.get(rel["relation"], rel["relation"].lower())
+            obj = self._clean(rel["object"])
+            parts.append(f"From what I've processed, {norm} {verb} {obj}.")
+
+        if stage == 2:
+            return " ".join(parts) if parts else None
+
+        # Stage 3: prose + inference chain
         inf = self._brain.inference.query(norm)
         if inf["as_subject"]:
             entry = inf["as_subject"][0]
             verb = _REL_VERBS_BASE.get(entry["relation"], entry["relation"].lower())
             obj = self._clean(entry["object"])
-            # Show the reasoning path when there's a chain
             chain = self._brain.inference.chain_for(norm, entry["relation"],
                                                     entry["object"])
             if chain and len(chain) >= 2:
-                # Extract interior steps (not start or end) that are clean concepts
                 inner = [
                     self._clean(step["to"])
                     for step in chain[:-1]
                     if self._is_clean(step["to"]) and self._clean(step["to"]) not in (norm, obj)
-                ][:2]
+                ][:1]
                 if inner:
-                    via = " → ".join(inner)
-                    return (
-                        f"From what I've worked out, {norm} appears to {verb} {obj} "
-                        f"— it runs through {via}."
+                    parts.append(
+                        f"I've worked out that {norm} appears to {verb} {obj} "
+                        f"— it runs through {inner[0]}."
                     )
-            return (
-                f"From what I have processed, {norm} appears to {verb} {obj}. "
-                f"I derived that across {entry['chain_length']} steps."
-            )
+                else:
+                    parts.append(f"I've worked out that {norm} appears to {verb} {obj}.")
+            else:
+                parts.append(f"I've worked out that {norm} appears to {verb} {obj}.")
 
-        # Fall back to direct relations — prefer a clean object to talk about
-        outgoing = self._brain.relations.query_subject(norm, min_confidence=0.5)
-        clean_out = [r for r in outgoing if self._is_clean(r["object"])]
-        chosen = clean_out or outgoing
-        if chosen:
-            rel = chosen[0]
-            verb = _REL_VERBS.get(rel["relation"], rel["relation"].lower())
-            obj = self._clean(rel["object"])
-            return f"I have learned that {norm} {verb} {obj}."
-
-        return f"I have encountered {norm} but have not formed strong connections around it yet."
+        return " ".join(parts) if parts else None
 
     # ------------------------------------------------------------------
     # Delivery

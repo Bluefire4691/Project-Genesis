@@ -155,6 +155,8 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | M20 | ✅ | Autonomous cognitive loop: daemon thread that runs between interactions — follows curiosity directives, re-evaluates belief tensions, periodic reflection; adapts pace; errors never stop the loop; `tick_once()` for testing; full status telemetry |
 | M21 | ✅ | Knowledge synthesis: graph-to-language — expresses understanding by traversing actual relation graph with typed sentence frames; corroboration counts from belief revision; multi-hop causal chains; tensions and curiosity surfaced as epistemic gaps; consolidation reflections now use real synthesis not templates |
 | M22 | ✅ | Pattern transfer: structural role fingerprinting (Gentner 1983 structure-mapping) — Jaccard similarity over RELATION_DIRECTION token sets; five abstract roles (REGULATOR/MEDIATOR/OUTCOME/INHIBITOR/DEPENDENCY); analog pairs stored in DB; curiosity_from_analogs() identifies concepts with same role but missing expected edges; hooked into reflect() |
+| M23 | ✅ | Progressive language acquisition: expression grows with understanding (Stage 0→3 based on memory hits + relations); Stage 1 echoes actual retained prose from memory; Stage 2 composes 2–3 sentences from retained text + derived relation; Stage 3 weaves prose + inference chain narration; `_say_thoughts()` surfaces real sentences not just concept names; `_compose_inference()` grounds derivations in processed language — no LLM, all language drawn from what Genesis actually read |
+| — | ✅ | End-to-end integration tests: real Orchestrator + real WordNet, verifying relation growth, retention, frontier honesty, chunker structure; chunker rewritten to never drop sentences for length (was silently discarding the cleanest causal structures); feeder exhaustion state persists across sessions (was resetting every restart); Gutenberg cache-first with 5-min offline cooldown (was permanently latching offline after one failure); live UI liveness pulse routed to thought log (was clobbering user input) |
 
 ---
 
@@ -190,7 +192,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 - **Never test implementation details of lower layers from higher-layer tests.** Test M1
   in `test_survival_*.py`. Test M4 in `test_orchestrator.py`. Don't reach across layers.
 - Run full suite before committing: `python -m pytest` from `project-genesis/`.
-  Currently: **863 tests, all passing.**
+  Currently: **890 tests, all passing.**
 
 ---
 

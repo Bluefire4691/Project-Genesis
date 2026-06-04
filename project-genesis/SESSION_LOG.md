@@ -1628,3 +1628,78 @@ Genesis's background thinking must be distinguishable from interactive sessions 
 provenance. When the loop revises a belief or fetches knowledge autonomously, that's a
 different epistemic event than a human-triggered query. The Wakefield principle depends
 on source identity.
+
+---
+
+## Session: M23 — Progressive Language Acquisition
+
+### What was built
+
+**M23: Progressive Language Acquisition** (`src/output/voice.py`)
+
+Genesis now expresses itself at the right level of maturity for each concept — the same
+way a child's vocabulary grows from single words to sentences to compound reasoning as
+exposure and understanding deepen.
+
+**The four stages:**
+- Stage 0 (barely seen, <2 memory hits + relations): honest acknowledgement only,
+  no pretended depth ("I've encountered X but haven't formed much understanding yet.")
+- Stage 1 (2–5 total): echoes one actual retained prose sentence from memory
+- Stage 2 (6–14 total): 2–3 retained sentences + one derived relation
+- Stage 3 (15+ total): prose + inference chain narration weaving in the derivation path
+
+**The core principle:** the language is drawn entirely from text Genesis actually
+processed — WordNet definitions, book passages, conversation input. Stage 1 Genesis
+doesn't say "I have learned that wolf causes prey_decline" — it says "A wolf hunts deer
+in the forest." because that is a sentence it read. Higher stages compose richer
+expressions from more retained text.
+
+**Three key methods added to GenesisVoice:**
+- `_stage_for_concept(concept)` — computes maturity from memory search hits + relation count
+- `_pull_prose_about(concept, n)` — retrieves actual retained sentences from memory store,
+  filtering out any entries that contain raw relation tokens (IS_A, CAUSES etc.)
+- New `_compose_about()` — dispatches to the right composition strategy by stage
+
+**Additional improvements:**
+- `_say_thoughts()` now surfaces an actual prose sentence for the most salient concept,
+  not just listing concept names
+- `_compose_inference()` now grounds inferences in processed language at Stage 2+:
+  "Wolves hunt deer in packs. From this, I've worked out that wolves appear to
+  affect deer — the connection runs through predation."
+
+### Bug fixes also landed this session (from previous context window)
+
+- **Chunker rewrite**: removed 60-char minimum floor that was silently discarding the
+  shortest, cleanest causal sentences ("Wolves hunt deer."). Confirmed by e2e test.
+- **Feeder exhaustion persistence**: `feeder_topic_state` table persists strike counts
+  and failed topics across restarts. Relations no longer "get stuck" on restart.
+- **Gutenberg cache-first**: local book library served without network; 300s offline
+  cooldown replaces the permanent session latch.
+- **Live UI liveness pulse**: routed to thought log, no longer clobbering `input()`.
+
+### Tests added
+- `tests/test_language_acquisition.py` — 13 tests covering all four stages,
+  prose retrieval, clean output, and the chat_respond flow
+- `tests/test_end_to_end.py` — 7 integration tests running the real pipeline
+- `tests/test_gutenberg_local.py` — 7 offline-path tests for the book library
+
+890 tests, all passing.
+
+### Architectural decisions
+
+**Why expression stages instead of a uniform template:**
+Templates impose a ceiling. A child doesn't learn to say "Wolf causes prey_decline";
+they say "Wolf!" then "wolf eat" then "wolf eats deer" then "wolves hunt deer in packs
+and this keeps the deer population in check." The stage system means Genesis can only
+say what it actually knows, in language proportional to its understanding.
+
+**Why pull prose from the memory store directly:**
+The retained text is already there. Adding a separate lexicon store would duplicate
+data and add maintenance cost. `memory.search(concept)` returns all entries that mention
+the concept; `content.split("|")[0]` recovers the original prose sentence. Zero new
+storage required.
+
+**Why filter raw relation tokens from prose:**
+The memory store's `content` field sometimes includes the extracted relation context
+after a `|` separator ("A neuron contains dendrites. | {keywords...}"). The filter
+ensures only the prose half reaches the voice layer.
