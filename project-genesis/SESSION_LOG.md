@@ -1522,3 +1522,109 @@ an active curiosity directive — Genesis seeks more data rather than flipping a
 **Why beliefs are never deleted:**
 Total retention is architecturally load-bearing. A belief at 0.10 confidence still exists
 in the audit trail. Wrong things Genesis once believed are part of its history.
+
+---
+
+## Session N — June 4, 2026
+
+**Platform:** Claude Code (claude/extract-genesis-repo-fn5vW)
+
+### What happened
+
+Completed M19 (Spreading Activation), M20 (Autonomous Loop), M21 (Knowledge Synthesis),
+and M22 (Pattern Transfer) — the four modules needed to bring Genesis from a system
+that answers questions to one that thinks, acts, and generalizes.
+
+### What was built
+
+**`src/cognition/spreading_activation.py`** — M19 — ACT-R associative retrieval
+
+BFS from current attention window through the relation graph with exponential decay per
+hop (0.50/hop). Memory search now accepts `activation_boost` and re-ranks results by
+a combination of textual similarity and graph proximity to current context. Primed
+concepts surfaced in `query()` response under `primed_concepts`. Matches `_normalise()`
+exactly — underscores and non-alnum stripped.
+
+Constants: `_DECAY=0.50`, `_MAX_HOPS=3`, `_MIN_ACTIVATION=0.05`, `_MAX_BOOST=0.35`
+
+**`src/cognition/autonomous_loop.py`** — M20 — Background cognitive daemon
+
+Runs between interactions on a daemon thread. Three-priority loop per tick:
+1. Follow curiosity directives → `fetch_knowledge()` for highest-priority concepts
+2. Re-evaluate belief tensions → `evaluate_and_revise()`
+3. Periodic reflection/consolidation every N ticks
+
+Adapts pace: active work uses 15s interval, idle uses configurable (default 60s).
+Errors are data — tick failures never stop the loop. `tick_once()` for synchronous
+testing. `status()` exposes full telemetry. Wired into Orchestrator as `o.autonomous`
+with `start_autonomous()` / `stop_autonomous()` methods.
+
+**`src/cognition/knowledge_synthesis.py`** — M21 — Graph-to-language
+
+Expresses Genesis's understanding as coherent language by traversing the actual relation
+graph. Not template string interpolation — typed relation frames (CAUSES/PREVENTS/
+ENABLES/REQUIRES/CONTROLS/IS_A/AFFECTS), corroboration counts from belief revision,
+multi-hop causal chains via DFS, unresolved tensions surfaced as explicit uncertainty,
+active curiosity directives shown as epistemic gaps.
+
+`_conf_label()`: "clearly" (≥0.85), "reliably" (≥0.70), "likely" (≥0.55), "possibly"
+
+Three entry points: `explain(concept)`, `reflect_on_state()`, `revision_narrative()`.
+Wired into ConsolidationEngine's `_compose_summary()` so reflections are real synthesis
+not templates. Wired into Orchestrator as `o.synthesis`.
+
+**`src/cognition/pattern_transfer.py`** — M22 — Structural analog detection
+
+Structural role fingerprinting based on Gentner (1983) structure-mapping theory.
+Each concept gets a fingerprint: sorted list of RELATION_DIRECTION tokens. Two concepts
+from different domains with the same fingerprint (Jaccard ≥ 0.60) are structural analogs.
+
+Five abstract role labels: REGULATOR (CAUSES_OUT + CONTROLS_OUT), MEDIATOR (CAUSES_IN +
+CAUSES_OUT), OUTCOME (CAUSES_IN + AFFECTS_IN), INHIBITOR (PREVENTS_OUT), DEPENDENCY
+(REQUIRES_IN).
+
+`scan()` finds all analog pairs and stores in `structural_patterns` DB table.
+`curiosity_from_analogs()` identifies REGULATOR concepts lacking CAUSES_OUT edge —
+registers them as curiosity targets. Hooked into `reflect()` automatically.
+Two new DB tables: `structural_patterns`, `concept_roles`.
+
+**`src/orchestrator/orchestrator.py`** — wired M19/M20/M21/M22
+
+- `SpreadingActivation` in `__init__`, used in `query()` for activation-boosted retrieval
+- `AutonomousLoop` in `__init__`, `start_autonomous()` / `stop_autonomous()` methods
+- `KnowledgeSynthesis` in `__init__`, exposed as `o.synthesis`
+- `PatternTransfer` in `__init__`, scan called in `reflect()`, exposed as `o.pattern_transfer`
+
+**`src/consolidation/consolidation.py`** — upgraded `_compose_summary()`
+
+Now calls `synthesis.explain(lead_concept)` as primary content for reflections, replacing
+the old template. Falls back gracefully if synthesis unavailable.
+
+**Tests written:**
+- `tests/test_spreading_activation.py` — 34 tests
+- `tests/test_autonomous_loop.py` — 20 tests
+- `tests/test_knowledge_synthesis.py` — 22 tests
+- `tests/test_pattern_transfer.py` — 27 tests
+
+### Test suite
+
+863 tests, all passing (+60 from M20/M21/M22, +4 existing updated).
+
+### Architectural decisions made this session
+
+**Why no LLM API calls in synthesis:**
+Genesis expresses understanding by traversing the graph it built from processing real
+text. The language emerges from the structure, not from querying a language model.
+This is the only way the "individuality from processing history" claim is coherent.
+
+**Why pattern transfer over domain-specific schemas:**
+Gentner's structure-mapping: analogical transfer is structural, not surface similarity.
+Two concepts play the same role when their relation-type fingerprints match, regardless
+of which domain they came from. Wolves ≅ lions ≅ sharks — not because they're all
+predators (we never told Genesis that), but because they all have the same graph topology.
+
+**Why the autonomous loop uses its own session_id:**
+Genesis's background thinking must be distinguishable from interactive sessions for
+provenance. When the loop revises a belief or fetches knowledge autonomously, that's a
+different epistemic event than a human-triggered query. The Wakefield principle depends
+on source identity.

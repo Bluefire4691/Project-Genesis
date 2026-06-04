@@ -453,18 +453,31 @@ class ConsolidationEngine:
             return ("I went quiet and looked back over what I have processed, "
                     "but nothing has pulled at me strongly yet.")
 
-        names = [s["concept"] for s in top[:4]]
-        if len(names) == 1:
-            focus = names[0]
-        elif len(names) == 2:
-            focus = f"{names[0]} and {names[1]}"
-        else:
-            focus = ", ".join(names[:-1]) + f", and {names[-1]}"
+        # M21: use KnowledgeSynthesis to express the lead concept as
+        # genuine understanding rather than a template pulling concept names.
+        lead_concept = top[0]["concept"]
+        synthesis_text = ""
+        try:
+            if hasattr(self._brain, "synthesis"):
+                synthesis_text = self._brain.synthesis.explain(lead_concept)
+        except Exception:
+            pass
 
-        parts = [f"Lately I have been thinking about {focus}."]
+        if synthesis_text:
+            parts = [synthesis_text]
+        else:
+            # Fallback: concept-name template (original behaviour)
+            names = [s["concept"] for s in top[:4]]
+            if len(names) == 1:
+                focus = names[0]
+            elif len(names) == 2:
+                focus = f"{names[0]} and {names[1]}"
+            else:
+                focus = ", ".join(names[:-1]) + f", and {names[-1]}"
+            parts = [f"Lately I have been thinking about {focus}."]
 
         lead = top[0]
-        if lead["degree"] > 0:
+        if lead["degree"] > 0 and not synthesis_text:
             parts.append(
                 f"{lead['concept'].capitalize()} keeps coming up — it now "
                 f"connects to {lead['degree']} things in what I know."

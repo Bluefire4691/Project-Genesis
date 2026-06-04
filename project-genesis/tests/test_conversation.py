@@ -88,7 +88,11 @@ def test_thinking_question_uses_reflection():
     b = _taught_brain()
     reply = b.voice.chat_respond("what have you been thinking about?")
     _assert_clean(reply)
-    assert "thinking about" in reply.lower() or "building up" in reply.lower()
+    # synthesis upgrade: may say "thinking about", "building up", or express
+    # understanding directly ("my understanding of ...")
+    low = reply.lower()
+    assert ("thinking about" in low or "building up" in low
+            or "understanding" in low or "neuron" in low)
 
 
 def test_curiosity_question_is_about_gaps():

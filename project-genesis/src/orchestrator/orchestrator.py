@@ -128,6 +128,22 @@ class Orchestrator:
         from cognition.spreading_activation import SpreadingActivation
         self.spreading_activation = SpreadingActivation(self.relations)
 
+        # M20: Autonomous cognitive loop — Genesis runs between interactions.
+        # Not started automatically; call start_autonomous() to activate.
+        from cognition.autonomous_loop import AutonomousLoop
+        self.autonomous = AutonomousLoop(self, verbose=verbose)
+
+        # M21: Knowledge synthesis — express understanding as language from
+        # the graph, not from templates. Traverses actual relation chains.
+        from cognition.knowledge_synthesis import KnowledgeSynthesis
+        self.synthesis = KnowledgeSynthesis(self)
+
+        # M22: Pattern transfer — structural analog detection across domains.
+        # Concepts with the same relation-type fingerprint play the same role
+        # regardless of domain (wolves ≅ lions, deer ≅ gazelles).
+        from cognition.pattern_transfer import PatternTransfer
+        self.pattern_transfer = PatternTransfer(self.relations, _conn)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -575,6 +591,17 @@ class Orchestrator:
                 )
         except Exception:
             pass  # calibration failure never affects the reflection result
+
+        # M22: scan for structural analogs after each reflection pass.
+        # Reflection is when the relation graph is richest — best moment
+        # to detect patterns that have formed across processing sessions.
+        try:
+            new_analogs = self.pattern_transfer.scan()
+            if new_analogs > 0 and self.verbose:
+                self._log(f"  🔁 {new_analogs} structural analog pair(s) detected")
+        except Exception:
+            pass
+
         return result
 
     def latest_reflection(self) -> dict | None:
@@ -596,6 +623,31 @@ class Orchestrator:
         all inferences involving concept as subject or object.
         """
         return self.inference.infer(concept, session_id=self.session_id)
+
+    def start_autonomous(
+        self,
+        tick_interval: float = 60.0,
+        reflect_every: int = 6,
+    ) -> None:
+        """
+        Start the autonomous cognitive loop.
+
+        Genesis will run between interactions: following curiosity directives,
+        re-evaluating belief tensions, and periodically reflecting.
+        Call stop_autonomous() to halt it.
+        """
+        self.autonomous._idle_interval = tick_interval
+        self.autonomous._reflect_every = reflect_every
+        self.autonomous.start()
+        if self.verbose:
+            self._log(f"🔄 Autonomous loop started "
+                      f"(interval={tick_interval}s, reflect_every={reflect_every})")
+
+    def stop_autonomous(self) -> None:
+        """Stop the autonomous cognitive loop."""
+        self.autonomous.stop()
+        if self.verbose:
+            self._log("⏹  Autonomous loop stopped")
 
     def save_session(self) -> None:
         """Checkpoint current state to the DB for restore on next startup."""
