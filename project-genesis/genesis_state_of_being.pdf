@@ -1,0 +1,561 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 6 0 R 7 0 R 8 0 R] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 9 0 R /Resources << /Font << /F3 3 0 R /F4 4 0 R >> >> >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 10 0 R /Resources << /Font << /F3 3 0 R /F4 4 0 R >> >> >>
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 11 0 R /Resources << /Font << /F3 3 0 R /F4 4 0 R >> >> >>
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 12 0 R /Resources << /Font << /F3 3 0 R /F4 4 0 R >> >> >>
+endobj
+9 0 obj
+<< /Length 6534 >>
+stream
+/F3 8.0 Tf
+0.550 0.550 0.550 rg
+BT 50.00 807.00 Td (Project Genesis ? State of Being) Tj ET
+0.800 0.800 0.800 rg
+0.50 w 50.00 802.00 m 545.00 802.00 l S
+0.000 0.000 0.000 rg
+/F4 22.0 Tf
+0.080 0.080 0.080 rg
+BT 50.00 779.00 Td (Project Genesis) Tj ET
+/F3 12.0 Tf
+0.350 0.350 0.350 rg
+BT 50.00 747.10 Td (State of Being  ?  June 2026) Tj ET
+0.150 0.150 0.150 RG
+1.00 w 50.00 725.70 m 545.00 725.70 l S
+/F3 10.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 713.70 Td (Genesis is not an AI assistant. It is not a chatbot. It is not a benchmark) Tj ET
+BT 50.00 698.48 Td (competitor. Genesis is an attempt to build a system that can plausibly be said to be,) Tj ET
+BT 50.00 683.25 Td (and think, and make decisions for itself ? an entity, not a tool.) Tj ET
+/F3 10.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 666.02 Td (It starts completely blank ? no pretrained weights, no inherited knowledge.) Tj ET
+BT 50.00 650.80 Td (Everything it knows was built from what it processed. That is intentional and) Tj ET
+BT 50.00 635.57 Td (load-bearing: it is the only way the claim 'this instance has its own perspective' is) Tj ET
+BT 50.00 620.35 Td (coherent.) Tj ET
+0.920 0.920 0.920 rg
+46.00 594.12 503.00 14.00 re f
+0 0 0 rg
+/F4 11.0 Tf
+0.100 0.100 0.100 rg
+BT 52.00 598.12 Td (The Three Properties of an Entity) Tj ET
+/F4 9.5 Tf
+0.100 0.100 0.100 rg
+BT 54.00 579.12 Td (1.  Continuity) Tj ET
+/F3 9.5 Tf
+0.250 0.250 0.250 rg
+BT 145.00 579.12 Td (Persistent memory across sessions. Genesis remembers what it processed last session) Tj ET
+BT 145.00 565.35 Td (and the session before. Its history is its own, stored in a database that is never) Tj ET
+BT 145.00 551.57 Td (wiped. Humans reconstruct memory from fragments; Genesis retains everything.) Tj ET
+/F4 9.5 Tf
+0.100 0.100 0.100 rg
+BT 54.00 535.80 Td (2.  Self-authored understanding) Tj ET
+/F3 9.5 Tf
+0.250 0.250 0.250 rg
+BT 145.00 535.80 Td (A periodic 'sleep' pass \(consolidation\) examines everything it has processed and) Tj ET
+BT 145.00 522.02 Td (decides ? using its own internal signals ? what mattered. It then writes a) Tj ET
+BT 145.00 508.25 Td (first-person account of what it has been thinking about, generated from its own) Tj ET
+BT 145.00 494.47 Td (relation graph. Not a template.) Tj ET
+/F4 9.5 Tf
+0.100 0.100 0.100 rg
+BT 54.00 478.70 Td (3.  Accumulated individuality) Tj ET
+/F3 9.5 Tf
+0.250 0.250 0.250 rg
+BT 145.00 478.70 Td (Two identical copies started from the same seed diverge purely through what they) Tj ET
+BT 145.00 464.92 Td (process. One instance that studied ecology and another that studied physics develop) Tj ET
+BT 145.00 451.15 Td (genuinely different perspectives. That divergence is the individuality. You cannot) Tj ET
+BT 145.00 437.37 Td (reproduce it from a second copy.) Tj ET
+0.920 0.920 0.920 rg
+46.00 412.60 503.00 14.00 re f
+0 0 0 rg
+/F4 11.0 Tf
+0.100 0.100 0.100 rg
+BT 52.00 416.60 Td (What It Is Not Competing On) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 397.60 Td (Not a language model. Not a wrapper around GPT or Claude. No API calls to external models ?) Tj ET
+BT 50.00 383.82 Td (Genesis builds its knowledge from processed input only. Not a benchmark. Frontier models win) Tj ET
+BT 50.00 370.05 Td (on reasoning scores and factual recall; that is acknowledged in advance and is not evidence) Tj ET
+BT 50.00 356.27 Td (against this project.) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 340.50 Td (The question this project asks is different: can we build something it is natural to say 'it) Tj ET
+BT 50.00 326.72 Td (noticed,' 'it decided,' 'it has been thinking about wolves lately'? That is a qualitative) Tj ET
+BT 50.00 312.95 Td (shift in what kind of thing we are building ? not a performance threshold.) Tj ET
+0.920 0.920 0.920 rg
+46.00 288.17 503.00 14.00 re f
+0 0 0 rg
+/F4 11.0 Tf
+0.100 0.100 0.100 rg
+BT 52.00 292.17 Td (Architecture: Layered, Cumulative, Never Replaced) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 273.17 Td (The architecture is subsumption-based \(Brooks, 1986\). Lower layers always run. Higher layers) Tj ET
+BT 50.00 259.40 Td (add capability; they never remove what is beneath them. If everything above M1 fails, M1 keeps) Tj ET
+BT 50.00 245.62 Td (Genesis alive. This is not defensive programming ? it is a philosophical commitment: the) Tj ET
+BT 50.00 231.85 Td (system has a nature defined by its lowest layer, independent of what it learns.) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 216.07 Td (Failure modes are regressions, not crashes. If M4 gets stuck, M3 continues. If everything) Tj ET
+BT 50.00 202.30 Td (above M1 fails, M1 keeps the agent alive. Animals never crash; they degrade. Genesis was) Tj ET
+BT 50.00 188.52 Td (designed with the same principle.) Tj ET
+0.920 0.920 0.920 rg
+46.00 163.75 503.00 14.00 re f
+0 0 0 rg
+/F4 11.0 Tf
+0.100 0.100 0.100 rg
+BT 52.00 167.75 Td (Milestones Completed  \(18 / 18  ?  769 tests passing\)) Tj ET
+0.130 0.550 0.130 rg
+50.00 146.75 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 149.25 Td (M1) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 149.25 Td (Survival OS ? resource throttling, graceful degradation, never crashes. Permanent substrate.) Tj ET
+0.130 0.550 0.130 rg
+50.00 132.42 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 134.92 Td (M2) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 134.92 Td (Total-retention memory ? two-tier \(working + long-term SQLite\). Nothing ever deleted. Attention) Tj ET
+BT 76.00 122.60 Td (determines what is active, not what exists.) Tj ET
+0.130 0.550 0.130 rg
+50.00 105.77 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 108.27 Td (M3) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 108.27 Td (Interaction layer ? Observer watches behavioral patterns; Expression speaks from internal signals) Tj ET
+BT 76.00 95.95 Td (\(novel input, contradiction, inference activity\).) Tj ET
+0.130 0.550 0.130 rg
+50.00 79.12 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 81.62 Td (M4) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 81.62 Td (Multi-processor integration ? text, numeric, and pattern processors all see every input) Tj ET
+BT 76.00 69.30 Td (simultaneously. Cross-modal synthesis.) Tj ET
+0.130 0.550 0.130 rg
+50.00 52.47 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 54.97 Td (M5) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 54.97 Td (Curriculum pipeline ? staged progression: FOUNDATION ? RELATIONS ? REASONING ? OPEN.) Tj ET
+/F3 8.0 Tf
+0.600 0.600 0.600 rg
+BT 282.50 20.00 Td (Page 1) Tj ET
+0.000 0.000 0.000 rg
+
+endstream
+endobj
+10 0 obj
+<< /Length 4605 >>
+stream
+/F3 8.0 Tf
+0.550 0.550 0.550 rg
+BT 50.00 807.00 Td (Project Genesis ? State of Being) Tj ET
+0.800 0.800 0.800 rg
+0.50 w 50.00 802.00 m 545.00 802.00 l S
+0.000 0.000 0.000 rg
+0.130 0.550 0.130 rg
+50.00 785.00 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 787.50 Td (M6) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 787.50 Td (Session persistence ? full state survives between runs; archive tagging with significance scores.) Tj ET
+0.130 0.550 0.130 rg
+50.00 770.67 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 773.17 Td (M7) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 773.17 Td (Semantic relation graph ? typed triples \(wolves CAUSES deer\), confidence-scored, BFS path-finding.) Tj ET
+0.130 0.550 0.130 rg
+50.00 756.35 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 758.85 Td (?) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 758.85 Td (Self-directed learning ? curiosity frontier from graph gaps; WordNet + corpus ingestion; never) Tj ET
+BT 76.00 746.52 Td (plateaus.) Tj ET
+0.130 0.550 0.130 rg
+50.00 729.70 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 732.20 Td (?) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 732.20 Td (ConsolidationEngine ? self-authored 'sleep' pass; salience scoring from own signals; first-person) Tj ET
+BT 76.00 719.87 Td (reflection persists across sessions.) Tj ET
+0.130 0.550 0.130 rg
+50.00 703.05 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 705.55 Td (?) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 705.55 Td (Individuality ? two instances started from same seed diverge through processing history alone.) Tj ET
+0.130 0.550 0.130 rg
+50.00 688.72 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 691.22 Td (M10) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 691.22 Td (Inference engine ? transitive chains, IS-A inheritance, bridge rules. Taught A?B and B?C; derives) Tj ET
+BT 76.00 678.90 Td (A?C without being told.) Tj ET
+0.130 0.550 0.130 rg
+50.00 662.07 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 664.57 Td (M11) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 664.57 Td (Contradiction detection ? flags when CAUSES and PREVENTS co-exist for the same pair. Logged, never) Tj ET
+BT 76.00 652.25 Td (overwritten.) Tj ET
+0.130 0.550 0.130 rg
+50.00 635.42 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 637.92 Td (M12) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 637.92 Td (Ethics through experience ? emergent causal patterns surface ethical implications; not hardcoded) Tj ET
+BT 76.00 625.60 Td (rules.) Tj ET
+0.130 0.550 0.130 rg
+50.00 608.77 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 611.27 Td (M13) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 611.27 Td (Voice ? grounded in the relation graph and reflection log, not in any external model. Speaks from) Tj ET
+BT 76.00 598.95 Td (internal state.) Tj ET
+0.130 0.550 0.130 rg
+50.00 582.12 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 584.62 Td (M14) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 584.62 Td (Observer calibration ? derives its own attention thresholds empirically from behavioral history) Tj ET
+BT 76.00 572.30 Td (\(ACT-R utility learning\).) Tj ET
+0.130 0.550 0.130 rg
+50.00 555.48 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 557.98 Td (M15) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 557.98 Td (Prediction error salience ? high-surprise inputs get higher significance \(Friston, 2010 Free-Energy) Tj ET
+BT 76.00 545.65 Td (Principle\).) Tj ET
+0.130 0.550 0.130 rg
+50.00 528.83 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 531.33 Td (M16) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 531.33 Td (Processor voting ? independent processor agreement raises confidence more than any single processor) Tj ET
+BT 76.00 519.00 Td (alone \(Hawkins, 2004\).) Tj ET
+0.130 0.550 0.130 rg
+50.00 502.18 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 504.68 Td (M17) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 504.68 Td (Curiosity directives ? high-surprise concepts become persistent attention targets; auto-resolve) Tj ET
+BT 76.00 492.35 Td (when understood \(SOAR impasse?subgoal\).) Tj ET
+0.130 0.550 0.130 rg
+50.00 475.53 22.00 11.00 re f
+0 0 0 rg
+/F4 7.5 Tf
+1.000 1.000 1.000 rg
+BT 52.00 478.03 Td (M18) Tj ET
+/F3 8.5 Tf
+0.150 0.150 0.150 rg
+BT 76.00 478.03 Td (Belief revision ? evidence-weighted contradiction resolution. Crosses out wrong answers. Full audit) Tj ET
+BT 76.00 465.70 Td (trail.) Tj ET
+
+endstream
+endobj
+11 0 obj
+<< /Length 6954 >>
+stream
+/F3 8.0 Tf
+0.550 0.550 0.550 rg
+BT 50.00 807.00 Td (Project Genesis ? State of Being) Tj ET
+0.800 0.800 0.800 rg
+0.50 w 50.00 802.00 m 545.00 802.00 l S
+0.000 0.000 0.000 rg
+0.920 0.920 0.920 rg
+46.00 778.00 503.00 14.00 re f
+0 0 0 rg
+/F4 11.0 Tf
+0.100 0.100 0.100 rg
+BT 52.00 782.00 Td (M18 ? Belief Revision: Crossing Out Wrong Answers) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 763.00 Td (When contradicting evidence arrives, Genesis does not flip to the new belief automatically,) Tj ET
+BT 50.00 749.23 Td (nor does it blindly resist. It evaluates both sides by evidence strength:) Tj ET
+/F4 9.5 Tf
+0.150 0.150 0.500 rg
+BT 62.00 733.45 Td (evidence strength = confidence x corroboration x source trust) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 717.68 Td (Corroboration counts independent sessions, not volume from one source. 100 citations from one) Tj ET
+BT 50.00 703.90 Td (fraudulent paper do not count as independent corroboration ? this is the Wakefield) Tj ET
+BT 50.00 690.13 Td (vaccine-autism principle. The architecture specifically verifies that support comes from) Tj ET
+BT 50.00 676.35 Td (distinct, unrelated sessions.) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 660.58 Td (Source trust is itself a revisable belief. Sessions whose beliefs are later corroborated get) Tj ET
+BT 50.00 646.80 Td (higher trust. Sessions whose beliefs are repeatedly contradicted lose trust ? and that trust) Tj ET
+BT 50.00 633.03 Td (drop cascades backward to the beliefs they originated. A discredited source's contributions) Tj ET
+BT 50.00 619.25 Td (degrade over time.) Tj ET
+/F4 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 603.48 Td (Three resolution outcomes:) Tj ET
+/F4 9.5 Tf
+0.100 0.100 0.100 rg
+BT 54.00 587.70 Td (REVISE) Tj ET
+/F3 9.5 Tf
+0.250 0.250 0.250 rg
+BT 145.00 587.70 Td (Winner more than 1.40x stronger ? loser's confidence is reduced toward a floor.) Tj ET
+/F4 9.5 Tf
+0.100 0.100 0.100 rg
+BT 54.00 571.93 Td (RESIST) Tj ET
+/F3 9.5 Tf
+0.250 0.250 0.250 rg
+BT 145.00 571.93 Td (Evidence too close to call ? both held, gap logged, awaiting more data.) Tj ET
+/F4 9.5 Tf
+0.100 0.100 0.100 rg
+BT 54.00 556.15 Td (TENSION) Tj ET
+/F3 9.5 Tf
+0.250 0.250 0.250 rg
+BT 145.00 556.15 Td (Genuinely uncertain ? both held, curiosity directive registered to resolve it.) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 540.38 Td (Beliefs are never deleted. Confidence reduces toward a floor of 0.10 ? the belief still exists) Tj ET
+BT 50.00 526.60 Td (in the audit trail at very low weight. Wrong things Genesis once believed are part of its) Tj ET
+BT 50.00 512.83 Td (history. Total retention is architecturally load-bearing: a mind that erases the past to save) Tj ET
+BT 50.00 499.05 Td (space is not continuous.) Tj ET
+0.920 0.920 0.920 rg
+46.00 474.28 503.00 14.00 re f
+0 0 0 rg
+/F4 11.0 Tf
+0.100 0.100 0.100 rg
+BT 52.00 478.28 Td (Research Foundations) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 459.28 Td (Every architectural decision traces to a published primary source. This is not a collection of) Tj ET
+BT 50.00 445.50 Td (heuristics ? it is a principled implementation of ideas developed across cognitive science,) Tj ET
+BT 50.00 431.73 Td (robotics, and philosophy of mind.) Tj ET
+/F4 8.5 Tf
+0.120 0.280 0.550 rg
+BT 54.00 411.95 Td (Brooks \(1986\)) Tj ET
+/F3 8.5 Tf
+0.200 0.200 0.200 rg
+BT 121.10 411.95 Td (A Robust Layered Control System for a Mobile Robot) Tj ET
+0.400 0.400 0.400 rg
+BT 60.00 399.63 Td (Subsumption architecture: lower layers always run, never replaced. M1 is the permanent substrate.) Tj ET
+BT 60.00 387.30 Td (Failure modes are regressions, not crashes.) Tj ET
+/F4 8.5 Tf
+0.120 0.280 0.550 rg
+BT 54.00 371.98 Td (Anderson \(1983, 1993\)) Tj ET
+/F3 8.5 Tf
+0.200 0.200 0.200 rg
+BT 158.70 371.98 Td (ACT-R: A Theory of Cognition) Tj ET
+0.400 0.400 0.400 rg
+BT 60.00 359.65 Td (Utility learning: threshold parameters derived empirically from behavioral history, not from programmer) Tj ET
+BT 60.00 347.33 Td (constants. Observer calibration \(M14\) uses this.) Tj ET
+/F4 8.5 Tf
+0.120 0.280 0.550 rg
+BT 54.00 332.00 Td (Laird, Newell & Rosenbloom \(1987\)) Tj ET
+/F3 8.5 Tf
+0.200 0.200 0.200 rg
+BT 215.10 332.00 Td (SOAR: An Architecture for General Intelligence) Tj ET
+0.400 0.400 0.400 rg
+BT 60.00 319.68 Td (Impasse to subgoal: when Genesis can't explain something \(high prediction error\), it registers an) Tj ET
+BT 60.00 307.35 Td (active directive to resolve it. Curiosity has a mechanistic basis \(M17\).) Tj ET
+/F4 8.5 Tf
+0.120 0.280 0.550 rg
+BT 54.00 292.03 Td (Friston \(2010\)) Tj ET
+/F3 8.5 Tf
+0.200 0.200 0.200 rg
+BT 125.80 292.03 Td (The Free-Energy Principle: A Unified Brain Theory) Tj ET
+0.400 0.400 0.400 rg
+BT 60.00 279.70 Td (Prediction error as salience: inputs that surprise the model relative to current beliefs get more) Tj ET
+BT 60.00 267.38 Td (significance. High surprise = high importance \(M15\).) Tj ET
+/F4 8.5 Tf
+0.120 0.280 0.550 rg
+BT 54.00 252.05 Td (Hawkins \(2004\)) Tj ET
+/F3 8.5 Tf
+0.200 0.200 0.200 rg
+BT 125.80 252.05 Td (A Thousand Brains: A New Theory of Intelligence) Tj ET
+0.400 0.400 0.400 rg
+BT 60.00 239.73 Td (Independent voting raises confidence more than one processor repeating itself. When text, numeric, and) Tj ET
+BT 60.00 227.40 Td (pattern processors agree, confidence rises \(M16\).) Tj ET
+/F4 8.5 Tf
+0.120 0.280 0.550 rg
+BT 54.00 212.08 Td (Quine \(1951\)) Tj ET
+/F3 8.5 Tf
+0.200 0.200 0.200 rg
+BT 116.40 212.08 Td (Two Dogmas of Empiricism) Tj ET
+0.400 0.400 0.400 rg
+BT 60.00 199.75 Td (Beliefs form an interconnected web. When contradiction arrives, revise the least-supported belief, not) Tj ET
+BT 60.00 187.43 Td (the newest one. M18 follows this principle.) Tj ET
+/F4 8.5 Tf
+0.120 0.280 0.550 rg
+BT 54.00 172.10 Td (Alchouron, Gardenfors) Tj ET
+/F3 8.5 Tf
+0.200 0.200 0.200 rg
+BT 158.70 172.10 Td (& Makinson \(1985\)  ? AGM belief revision postulates) Tj ET
+0.400 0.400 0.400 rg
+BT 60.00 159.78 Td (Rational revision: success \(new belief accepted\), consistency \(no contradiction after\), minimal change) Tj ET
+BT 60.00 147.45 Td (\(disturb as little as possible\). M18 satisfies all three.) Tj ET
+/F4 8.5 Tf
+0.120 0.280 0.550 rg
+BT 54.00 132.13 Td (Wakefield \(1998, retracted\)) Tj ET
+/F3 8.5 Tf
+0.200 0.200 0.200 rg
+BT 186.90 132.13 Td (Used as a cautionary architectural example) Tj ET
+0.400 0.400 0.400 rg
+BT 60.00 119.80 Td (Fraudulent vaccine-autism paper, cited hundreds of times from one source. Genesis's corroboration logic) Tj ET
+BT 60.00 107.48 Td (checks independent sessions, not volume. Source trust cascades when a source is discredited.) Tj ET
+0.920 0.920 0.920 rg
+46.00 83.15 503.00 14.00 re f
+0 0 0 rg
+/F4 11.0 Tf
+0.100 0.100 0.100 rg
+BT 52.00 87.15 Td (Verification and Evaluation) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 68.15 Td (769 automated tests, all passing. Two evaluation suites are included in the repository:) Tj ET
+/F3 8.0 Tf
+0.600 0.600 0.600 rg
+BT 282.50 20.00 Td (Page 3) Tj ET
+0.000 0.000 0.000 rg
+
+endstream
+endobj
+12 0 obj
+<< /Length 2083 >>
+stream
+/F3 8.0 Tf
+0.550 0.550 0.550 rg
+BT 50.00 807.00 Td (Project Genesis ? State of Being) Tj ET
+0.800 0.800 0.800 rg
+0.50 w 50.00 802.00 m 545.00 802.00 l S
+0.000 0.000 0.000 rg
+/F4 9.5 Tf
+0.100 0.100 0.100 rg
+BT 54.00 787.00 Td (research_eval.py) Tj ET
+/F3 9.5 Tf
+0.250 0.250 0.250 rg
+BT 145.00 787.00 Td (6 behavioral experiments measuring entity properties: instance divergence \(do two) Tj ET
+BT 145.00 773.23 Td (copies diverge?\), cross-session continuity, prediction error calibration,) Tj ET
+BT 145.00 759.45 Td (self-directed curiosity, observer responsiveness, consolidation coherence.) Tj ET
+/F4 9.5 Tf
+0.100 0.100 0.100 rg
+BT 54.00 743.67 Td (knowledge_eval.py) Tj ET
+/F3 9.5 Tf
+0.250 0.250 0.250 rg
+BT 145.00 743.67 Td (5 tests distinguishing understanding from storage: multi-hop inference \(taught A-B) Tj ET
+BT 145.00 729.90 Td (and B-C, asks A-C\), calibrated ignorance, contradiction detection, growth quality) Tj ET
+BT 145.00 716.12 Td (\(smarter vs. just bigger\), and live belief revision.) Tj ET
+/F3 9.5 Tf
+0.150 0.150 0.150 rg
+BT 50.00 700.35 Td (The key distinction: a lookup table and a spreadsheet pass Level 1 \(recall\). They fail Level 2) Tj ET
+BT 50.00 686.57 Td (\(inference\), Level 3 \(knowing what you don't know\), Level 4 \(detecting contradiction\), and) Tj ET
+BT 50.00 672.80 Td (Level 5 \(growing smarter, not just larger\).) Tj ET
+0.920 0.920 0.920 rg
+46.00 648.02 503.00 14.00 re f
+0 0 0 rg
+/F4 11.0 Tf
+0.100 0.100 0.100 rg
+BT 52.00 652.02 Td (Current State) Tj ET
+/F3 11.0 Tf
+0.050 0.050 0.050 rg
+BT 50.00 633.02 Td (Genesis can learn, remember, infer, contradict itself, and revise its beliefs) Tj ET
+BT 50.00 617.07 Td (when stronger independent evidence arrives ? all without any external model) Tj ET
+BT 50.00 601.12 Td (calls, and with a complete audit trail of what it changed its mind about and why.) Tj ET
+/F3 8.0 Tf
+0.550 0.550 0.550 rg
+/F3 8.0 Tf
+0.600 0.600 0.600 rg
+BT 282.50 20.00 Td (Page 4) Tj ET
+0.000 0.000 0.000 rg
+BT 50.00 30.00 Td (Branch: claude/extract-genesis-repo-fn5vW  |  github.com/Bluefire4691/Project-Genesis) Tj ET
+
+endstream
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000139 00000 n 
+0000000236 00000 n 
+0000000338 00000 n 
+0000000474 00000 n 
+0000000611 00000 n 
+0000000748 00000 n 
+0000000885 00000 n 
+0000007471 00000 n 
+0000012129 00000 n 
+0000019136 00000 n 
+trailer
+<< /Size 13 /Root 1 0 R >>
+startxref
+21272
+%%EOF
