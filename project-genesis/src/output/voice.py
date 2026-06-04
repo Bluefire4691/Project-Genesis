@@ -148,6 +148,86 @@ class GenesisVoice:
             self._deliver(statement)
         return statement
 
+    def wake_greeting(self) -> str:
+        """
+        First-person session-start account of what Genesis has been thinking about.
+
+        Called when Genesis starts with existing history. Surfaces:
+          - What it has been reflecting on (salient concepts from the latest reflection)
+          - What new conclusions it worked out (inference count)
+          - What it is still curious about (curiosity frontier)
+
+        If there is no prior history this is Genesis's first session; returns
+        a brief "starting fresh" message instead.
+
+        This is the primary expression of continuity: the system tells you what
+        it has been thinking about since you last interacted with it — not because
+        we template that, but because the reflection engine has been recording it.
+        """
+        reflection = self._latest_reflection()
+
+        if not reflection:
+            rel_total = self._brain.relations.stats().get("total_relations", 0)
+            if rel_total == 0:
+                return "Starting fresh — no prior memory. Ready to begin."
+            # Has relations but no reflection yet
+            return (f"I'm picking up where I left off. I have {rel_total} connections "
+                    f"in my knowledge so far but haven't reflected yet.")
+
+        # ── What I've been thinking about ──
+        salient = reflection.get("salient", [])
+        clean_salient = [self._clean(s["concept"]) for s in salient[:4]
+                         if self._is_clean(s["concept"])]
+
+        if clean_salient:
+            if len(clean_salient) == 1:
+                thought = f"I've been thinking about {clean_salient[0]}."
+            else:
+                thought = (f"I've been thinking about "
+                           f"{self._english_list(clean_salient)}.")
+        else:
+            thought = "I've been quiet — not much has pulled at me recently."
+
+        parts = [thought]
+
+        # ── What new conclusions I've worked out ──
+        inf_stats = self._brain.inference.stats()
+        inf_total = inf_stats.get("total_inferences", 0)
+        if inf_total > 0:
+            # Describe a specific one if available
+            top_inf = self._brain.inference.top_inferences(limit=5)
+            best = next(
+                (e for e in top_inf
+                 if self._is_clean(e["subject"]) and self._is_clean(e["object"])),
+                None,
+            )
+            if best:
+                verb = _REL_VERBS.get(best["relation"], best["relation"].lower())
+                subj = self._clean(best["subject"])
+                obj = self._clean(best["object"])
+                parts.append(
+                    f"I've worked out {inf_total} conclusion"
+                    f"{'s' if inf_total != 1 else ''} so far — for instance, "
+                    f"that {subj} {verb} {obj}."
+                )
+            else:
+                parts.append(
+                    f"I've derived {inf_total} conclusion"
+                    f"{'s' if inf_total != 1 else ''} from the connections I've built."
+                )
+
+        # ── What I'm still curious about ──
+        gaps = self._open_gaps()
+        if gaps:
+            self._rng.shuffle(gaps)
+            gap = gaps[0]
+            parts.append(
+                f"I'm still trying to understand {gap} — "
+                f"I've encountered it but can't fully place it yet."
+            )
+
+        return " ".join(parts)
+
     def chat_respond(self, user_text: str) -> str:
         """
         Receive user input, learn from it, and produce a conversational reply.

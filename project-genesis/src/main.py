@@ -338,6 +338,15 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     print("  Commands: quit  summary  curiosity  thoughts  reflect  status  save")
     print()
 
+    # Wake greeting — what Genesis has been thinking about since last session
+    try:
+        greeting = brain.voice.wake_greeting()
+        if greeting:
+            print(f"  Genesis: {greeting}")
+            print()
+    except Exception:
+        pass
+
     # Use a clean prefix in live mode — overrides the default "[Genesis] "
     brain.voice.set_channel(
         __import__("output.channel", fromlist=["TextChannel"]).TextChannel(
@@ -657,8 +666,11 @@ def run_chat(brain):
     original_verbose = brain.verbose
     brain.verbose = False
 
-    # Show what Genesis wants to open with
-    opening = brain.voice.compose(trigger="attention")
+    # Show what Genesis wants to open with — its current state
+    try:
+        opening = brain.voice.wake_greeting()
+    except Exception:
+        opening = brain.voice.compose(trigger="attention")
     if opening:
         print(f"  Genesis: {opening}")
         print()
@@ -1165,8 +1177,8 @@ def main():
     )
 
     if resume and brain.curriculum.current_stage == Stage.OPEN:
-        print(f"  [RESUME] Picking up from cycle {brain.cycle_count} "
-              f"in OPEN stage with {len(brain.memory.memories)} warm memories.")
+        greeting = brain.voice.wake_greeting()
+        print(f"\n  Genesis: {greeting}\n")
     elif not open_only:
         run_curriculum_pipeline(brain, verbose=verbose)
     else:

@@ -136,11 +136,12 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | — | ✅ | ConsolidationEngine: self-authored reflection ("sleep"), salience from own signals, persists across sessions |
 | — | ✅ | Individuality: reflection-salient concepts bias curiosity + adaptive attention; instances diverge from same seed |
 | — | ✅ | Conversation: intent-aware, grounded in reflection/graph, never leaks raw tokens, always learns |
-| M10 | 🔲 | Inference engine: transitive chains, wm_delta salience, OOD detection |
-| M11 | 🔲 | Contradiction detection: conflicting relations flagged, not overwritten |
-| M12 | 🔲 | Ethics through experience: consequence sequences, requires M9 |
-| M13 | 🔲 | Response generation: structured output, grounded statements |
+| M10 | ✅ | Inference engine: transitive chains, IS_A inheritance, bridge rules, cross-session |
+| M11 | ✅ | Contradiction detection: CAUSES↔PREVENTS etc., logged, never overwritten |
+| M12 | ✅ | Ethics through experience: EthicsLens surfaces emergent causal patterns |
+| M13 | ✅ | Voice: intent-aware conversation grounded in graph/reflection/inference |
 | M14 | 🔲 | Observer calibration: empirical thresholds from archive data |
+| — | ✅ | Wake greeting: session-start first-person account of what Genesis has been thinking |
 
 ---
 
@@ -176,7 +177,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 - **Never test implementation details of lower layers from higher-layer tests.** Test M1
   in `test_survival_*.py`. Test M4 in `test_orchestrator.py`. Don't reach across layers.
 - Run full suite before committing: `python -m pytest` from `project-genesis/`.
-  Currently: **620 tests, all passing.**
+  Currently: **628 tests, all passing.**
 
 ---
 
