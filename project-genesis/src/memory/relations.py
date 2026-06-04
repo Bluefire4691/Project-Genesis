@@ -315,6 +315,55 @@ class RelationGraph:
             "by_type": {r["rel_type"]: r["cnt"] for r in by_type_rows},
         }
 
+    # ------------------------------------------------------------------
+    # Prediction error (M15)
+    # ------------------------------------------------------------------
+
+    def prediction_error(self, concepts: list[str]) -> float:
+        """
+        Friston-grounded surprise signal: how unexpected is this input given
+        Genesis's current belief state?
+
+        For each concept, the prediction error is 1 minus the mean confidence
+        of all relations it participates in (as subject or object). A concept
+        Genesis knows well (many high-confidence relations) generates low error.
+        A concept Genesis knows nothing about generates maximum error (1.0).
+
+        Returns the mean prediction error across all supplied concepts,
+        clamped to [0.0, 1.0]. Empty concept list → 0.5 (neutral/unknown).
+        """
+        if not concepts:
+            return 0.5
+
+        errors = []
+        for raw in concepts:
+            concept = raw.strip().lower()
+            if not concept:
+                continue
+            try:
+                rows = self._conn.execute(
+                    """
+                    SELECT confidence FROM relations
+                    WHERE subject = ? OR object = ?
+                    ORDER BY confidence DESC
+                    LIMIT 20
+                    """,
+                    (concept, concept),
+                ).fetchall()
+            except Exception:
+                rows = []
+
+            if not rows:
+                errors.append(1.0)  # completely unknown → maximum surprise
+            else:
+                mean_conf = sum(r["confidence"] for r in rows) / len(rows)
+                errors.append(max(0.0, 1.0 - mean_conf))
+
+        if not errors:
+            return 0.5
+        return round(sum(errors) / len(errors), 4)
+
+
 
 # ==================================================================
 # Internal helpers

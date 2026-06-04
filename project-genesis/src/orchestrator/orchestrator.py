@@ -27,6 +27,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.types import ProcessorOutput
 from processors import TextProcessor, NumericProcessor, PatternProcessor
+from processors.interoception import interoception_sample
 from memory.memory import MemorySystem
 from memory.archive import ArchiveStore
 from memory.relations import RelationGraph
@@ -152,6 +153,17 @@ class Orchestrator:
         """
         self.cycle_count += 1
 
+        # Interoception: Genesis senses its own internal state periodically.
+        # This runs outside the main dispatch so it doesn't inflate cycle metrics,
+        # but the result is fed back through process_input as a numeric stream —
+        # same processing pipeline as any external input.
+        intero = interoception_sample(self)
+        if intero is not None:
+            try:
+                self._do_process("numeric", intero)
+            except Exception:
+                pass  # interoception failure is not a cycle failure
+
         # Layer 0: resource tick
         survival_stats = self._survival_stats()
         survival_state = self.survival.tick(survival_stats)
@@ -234,6 +246,11 @@ class Orchestrator:
         # OOD detection — check before storing so we use pre-storage state
         novel = self._is_novel(synthesis)
 
+        # M15: Prediction error — how surprising is this input given current beliefs?
+        # Computed before storing so it reflects the pre-update knowledge state.
+        # High error = Genesis has little/low-confidence knowledge about these concepts.
+        pred_error = self.relations.prediction_error(synthesis.context_terms)
+
         # Store everything if resources allow
         wm_before = len(self.memory.memories)
         if self.survival.can("memory_store"):
@@ -241,16 +258,23 @@ class Orchestrator:
             wm_delta = len(self.memory.memories) - wm_before
             if self.survival.can("logging"):
                 novel_tag = " [NOVEL]" if novel else ""
-                self._log(f"  💾 Stored {len(stored_keys)} key(s) Δwm={wm_delta:+d}{novel_tag}")
+                self._log(f"  💾 Stored {len(stored_keys)} key(s) Δwm={wm_delta:+d} "
+                          f"pred_err={pred_error:.2f}{novel_tag}")
 
-            # wm_delta boosts archive significance for disruptive inputs
-            if wm_delta > 0:
-                for key in stored_keys:
-                    self.archive.tag(
-                        key=key,
-                        significance=min(1.0, synthesis.significance + wm_delta * 0.05),
-                        session_id=self.session_id,
-                    )
+            # Archive significance = base significance boosted by prediction error.
+            # Inputs that genuinely surprised Genesis (high pred_error) get higher
+            # significance than inputs in well-known territory.
+            # wm_delta is retained as a secondary modifier for structural disruption.
+            boosted_sig = min(1.0,
+                synthesis.significance * (1.0 + pred_error * 0.5)
+                + wm_delta * 0.02
+            )
+            for key in stored_keys:
+                self.archive.tag(
+                    key=key,
+                    significance=boosted_sig,
+                    session_id=self.session_id,
+                )
 
             # Update attention with cross-modal concepts first, then primary terms
             attention_terms = synthesis.cross_modal_concepts or synthesis.context_terms
@@ -288,6 +312,7 @@ class Orchestrator:
             "throttle": self.survival.resource.throttle_level.name,
             "novel": novel,
             "wm_delta": wm_delta,
+            "prediction_error": pred_error,
             "expression": expression,
         }
 
