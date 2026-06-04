@@ -72,11 +72,14 @@ class KnowledgeFeeder:
         """
         n_topics = min(n_topics, self._MAX_TOPICS_PER_RUN)
 
-        # Ask the curiosity engine for a generous candidate pool, then pick the
-        # first n that aren't known dead-ends. The curiosity engine no longer
-        # excludes anything itself (that starved it), so the filtering for
-        # already-exhausted concepts happens here against live graph state.
-        candidates = self._curiosity.top_topics(n=n_topics * 6)
+        # Ask the curiosity engine for a candidate pool large enough to see
+        # past everything already set aside — otherwise a session's worth of
+        # struck-out dead-ends would crowd out the fresh vocabulary targets
+        # ranked just below them. The curiosity engine no longer excludes
+        # anything itself (that starved it); filtering for exhausted concepts
+        # happens here against live graph state.
+        pool_size = n_topics + len(self._unproductive) + len(self._failed_topics) + 40
+        candidates = self._curiosity.top_topics(n=pool_size)
         topics: list[str] = []
         for t in candidates:
             if t in self._failed_topics:

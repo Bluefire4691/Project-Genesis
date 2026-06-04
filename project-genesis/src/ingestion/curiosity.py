@@ -145,6 +145,7 @@ class CuriosityEngine:
         """
         candidates: list[tuple[float, str]] = []
         candidates.extend(self._graph_gap_targets())
+        candidates.extend(self._vocabulary_targets())
         candidates.extend(self._memory_text_targets())
 
         seen: dict[str, float] = {}
@@ -170,6 +171,17 @@ class CuriosityEngine:
                 "attention": 0.0,
                 "relations_known": 0,
             }
+
+        for score, concept in self._vocabulary_targets():
+            if concept not in candidates:
+                candidates[concept] = {
+                    "concept": concept,
+                    "source": "vocabulary",
+                    "curiosity_score": round(score, 3),
+                    "already_fetched": concept in self._fetched_topics,
+                    "attention": 0.0,
+                    "relations_known": 0,
+                }
 
         for score, concept in self._memory_text_targets():
             if concept not in candidates:
@@ -287,6 +299,73 @@ class CuriosityEngine:
 
             score = mem.relevance * (1.0 / max(1, relation_count))
             scored.append((score, concept))
+
+        return scored
+
+    # ------------------------------------------------------------------
+    # Tertiary signal: unexplained vocabulary from what Genesis has read
+    # ------------------------------------------------------------------
+
+    def _vocabulary_targets(self) -> list[tuple[float, str]]:
+        """
+        Words Genesis has *read* but cannot yet explain.
+
+        Every text it processes — a pool item, a corpus passage, a WordNet
+        definition — contains words that have never become the subject of any
+        relation. A reader who meets an unfamiliar word and looks it up is how
+        a mind grows; this is that, driven entirely by Genesis's own state
+        (what is unknown to *it*), not an external syllabus.
+
+        This is what keeps Genesis from going static. The relation graph alone
+        eventually collapses inward — every gap reduces to a concept it already
+        knows. But the text streaming through working memory carries an
+        effectively unbounded vocabulary, and each definition Genesis reads
+        introduces fresh words to be curious about. The frontier never closes
+        as long as it keeps reading.
+
+        Scored in a band above partial graph-gaps but below pure gaps:
+        frequently-seen unknown words first.
+        """
+        brain = self._brain
+        wm = brain.memory.memories
+        if not wm:
+            return []
+
+        # Concepts Genesis can already explain (appear as a relation subject).
+        # One query, then a cheap membership test — far cheaper than calling
+        # query_concept per word.
+        try:
+            explained = {
+                row[0] for row in brain.memory._long_term.conn.execute(
+                    "SELECT DISTINCT LOWER(subject) FROM relations"
+                ).fetchall()
+            }
+        except Exception:
+            explained = set()
+
+        freq: dict[str, int] = {}
+        sorted_wm = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)
+        for key, mem in sorted_wm[:80]:
+            if not key.startswith("text:"):
+                continue
+            # Stored content is "raw text | {json features}" — keep the raw text.
+            raw = (mem.content or "").split(" | ", 1)[0].lower()
+            for word in re.findall(r"[a-z]{4,}", raw):
+                if word in _SKIP_CONCEPTS or word in explained:
+                    continue
+                freq[word] = freq.get(word, 0) + 1
+
+        # Validate only the most frequent candidates against WordNet (the
+        # expensive step), capped so this stays cheap even with a full WM.
+        scored: list[tuple[float, str]] = []
+        checked = 0
+        for word, f in sorted(freq.items(), key=lambda kv: kv[1], reverse=True):
+            if checked >= 50:
+                break
+            checked += 1
+            if not _is_real_word(word):
+                continue
+            scored.append((100.0 + float(f), word))
 
         return scored
 
