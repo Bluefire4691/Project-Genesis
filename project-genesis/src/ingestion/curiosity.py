@@ -129,25 +129,28 @@ class CuriosityEngine:
         """
         Return the top N concepts Genesis is most curious about.
 
-        Prefers relation-graph gaps over memory key parsing.
-        Already-fetched topics are excluded, but the set resets once it
-        grows large so Genesis can revisit concepts with fresh understanding.
-        """
-        # Reset fetched set once it grows too large — Genesis learns more
-        # each session and re-reading the same corpus passage produces richer
-        # relations the second time around.
-        if len(self._fetched_topics) > 40:
-            self._fetched_topics = set()
+        The relation graph itself is the memory of what has been explored:
+        a concept with outgoing relations is no longer a pure gap and falls
+        out of the candidate set on its own. There is NO separate "already
+        fetched" exclusion here — that previously starved the engine, because
+        a small frontier (a handful of gaps) would all land in the exclusion
+        set and never clear, leaving Genesis with nothing to learn.
 
+        Avoiding genuine dead-ends (concepts WordNet cannot expand) is the
+        feeder's job — it tracks which topics yielded nothing and stops
+        retrying them. Here we simply rank the current gaps by curiosity.
+
+        `_fetched_topics` is still recorded, but only to drive the
+        `already_fetched` flag in curiosity_report — it never filters.
+        """
         candidates: list[tuple[float, str]] = []
         candidates.extend(self._graph_gap_targets())
         candidates.extend(self._memory_text_targets())
 
         seen: dict[str, float] = {}
         for score, concept in candidates:
-            if concept not in self._fetched_topics:
-                if concept not in seen or seen[concept] < score:
-                    seen[concept] = score
+            if concept not in seen or seen[concept] < score:
+                seen[concept] = score
 
         ranked = sorted(seen.items(), key=lambda kv: kv[1], reverse=True)
         topics = [concept for concept, _ in ranked[:n]]
@@ -191,10 +194,22 @@ class CuriosityEngine:
         """
         Find concepts that Genesis has heard of more than it can explain.
 
-        Scores each relation-object by incoming_references / max(1, outgoing_relations).
-        A concept mentioned by many things but able to explain little itself is the
-        richest learning target. This ratio stays meaningful even after thousands of
-        cycles — it never saturates to zero the way a pure "zero-outgoing" filter does.
+        Two tiers, in strict priority:
+
+          Tier 1 — pure gaps (outgoing == 0): concepts Genesis has encountered
+                   as the object of some relation but cannot explain at all.
+                   These are the real frontier. Every WordNet lookup introduces
+                   new ones (the hypernyms, parts, and causes it names), so this
+                   tier is continuously replenished as Genesis learns — it does
+                   not saturate as long as understanding keeps expanding.
+
+          Tier 2 — partial gaps (outgoing > 0): concepts Genesis can explain a
+                   little, scored by incoming / outgoing. Only consulted once the
+                   frontier of pure gaps is exhausted.
+
+        Pure gaps always outrank partial gaps so Genesis pushes outward into the
+        unknown instead of re-reading what it already understands (which would
+        only produce duplicate relations).
         """
         brain = self._brain
         try:
@@ -212,8 +227,10 @@ class CuriosityEngine:
                 SELECT inc.c, inc.n AS incoming, COALESCE(out.n, 0) AS outgoing
                 FROM inc
                 LEFT JOIN out ON inc.c = out.c
-                ORDER BY CAST(inc.n AS REAL) / MAX(1, COALESCE(out.n, 0)) DESC
-                LIMIT 60
+                ORDER BY
+                  (CASE WHEN COALESCE(out.n, 0) = 0 THEN 1 ELSE 0 END) DESC,
+                  inc.n DESC
+                LIMIT 150
             """)
             rows = cur.fetchall()
         except Exception:
@@ -222,10 +239,14 @@ class CuriosityEngine:
         scored = []
         for concept, incoming, outgoing in rows:
             clean = self._first_valid_word(concept)
-            if not clean or clean in self._fetched_topics:
+            if not clean:
                 continue
-            # Score = how much is referenced relative to how well it's understood
-            score = float(incoming) / max(1, outgoing)
+            if outgoing == 0:
+                # Pure gap — Genesis knows OF this but cannot explain it at all.
+                # Boosted so it always outranks partially-understood concepts.
+                score = 1000.0 + float(incoming)
+            else:
+                score = float(incoming) / outgoing
             scored.append((score, clean))
 
         return scored
@@ -255,7 +276,7 @@ class CuriosityEngine:
                 continue
 
             concept = self._key_to_single_word(key)
-            if not concept or concept in seen or concept in self._fetched_topics:
+            if not concept or concept in seen:
                 continue
             seen.add(concept)
 

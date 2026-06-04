@@ -56,8 +56,13 @@ class KnowledgeFeeder:
         self._total_topics_fetched: int = 0
         self._total_chunks_processed: int = 0
         self._failed_topics: set[str] = set()
+        # Concepts whose lookup produced no new relations, with a strike count.
+        # After _MAX_STRIKES unproductive fetches a concept is set aside so the
+        # feeder stops wasting cycles re-reading what it already fully knows.
+        self._unproductive: dict[str, int] = {}
 
     _MAX_TOPICS_PER_RUN = 10
+    _MAX_STRIKES = 2          # unproductive fetches before a topic is set aside
 
     def run(self, n_topics: int = 5, verbose: bool = True) -> dict:
         """
@@ -67,10 +72,20 @@ class KnowledgeFeeder:
         """
         n_topics = min(n_topics, self._MAX_TOPICS_PER_RUN)
 
-        topics = [
-            t for t in self._curiosity.top_topics(n=n_topics)
-            if t not in self._failed_topics
-        ]
+        # Ask the curiosity engine for a generous candidate pool, then pick the
+        # first n that aren't known dead-ends. The curiosity engine no longer
+        # excludes anything itself (that starved it), so the filtering for
+        # already-exhausted concepts happens here against live graph state.
+        candidates = self._curiosity.top_topics(n=n_topics * 6)
+        topics: list[str] = []
+        for t in candidates:
+            if t in self._failed_topics:
+                continue
+            if self._unproductive.get(t, 0) >= self._MAX_STRIKES:
+                continue
+            topics.append(t)
+            if len(topics) >= n_topics:
+                break
 
         if not topics:
             return {
@@ -80,7 +95,7 @@ class KnowledgeFeeder:
                 "relations_before": 0,
                 "relations_after": 0,
                 "relations_added": 0,
-                "note": "No curiosity targets found — process more input first.",
+                "note": "No fresh curiosity targets — frontier exhausted for now.",
             }
 
         relations_before = self._brain.relations.stats().get("total_relations", 0)
@@ -93,7 +108,16 @@ class KnowledgeFeeder:
             print()
 
         for topic in topics:
+            rel_before_topic = self._brain.relations.stats().get("total_relations", 0)
             result = self._fetch_and_process(topic, verbose=verbose)
+            rel_after_topic = self._brain.relations.stats().get("total_relations", 0)
+
+            # Track productivity: a topic that adds nothing new earns a strike.
+            if rel_after_topic > rel_before_topic:
+                self._unproductive[topic] = 0
+            else:
+                self._unproductive[topic] = self._unproductive.get(topic, 0) + 1
+
             results.append(result)
             self._total_topics_fetched += 1
 
@@ -146,11 +170,14 @@ class KnowledgeFeeder:
         title = topic.title()
 
         # --- WordNet: base definition, always available ---
+        # Fed whole, NOT through the chunker. WordNet emits short, clean
+        # declarative sentences ("Animal contains face.", "Kill causes die.")
+        # that the chunker's 60-char minimum would discard — exactly the
+        # structured sentences that yield the cleanest relation triples.
+        # The TextProcessor splits them into sentences itself, no length floor.
         definition = self._wordnet.lookup(topic)
         if definition:
-            all_chunks.extend(
-                chunk_text(definition, sentences_per_chunk=self._sentences_per_chunk)
-            )
+            all_chunks.append(definition)
             sources.append("WordNet")
 
         # --- Gutenberg: read the next passage from a relevant book ---

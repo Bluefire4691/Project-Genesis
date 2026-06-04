@@ -13,3 +13,4 @@ build/
 data/corpus_index.pkl
 data/book_cache/
 data/reading_positions.json
+data/genesis_thoughts.log

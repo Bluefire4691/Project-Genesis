@@ -50,8 +50,17 @@ if exist data\reading_positions.json (
 echo.
 echo  Genesis memory cleared. Starting fresh session...
 echo  Genesis will think and learn continuously.
+echo.
+echo  TWO windows will open:
+echo    - THIS window: talk to Genesis (just type).
+echo    - "Genesis - Live Thoughts": watch it think and learn.
 echo  Type anything to talk. Use /quit to exit.
 echo.
+
+:: Make sure the thoughts log exists, then open a second window that streams it.
+if not exist data mkdir data
+if not exist data\genesis_thoughts.log type nul > data\genesis_thoughts.log
+start "Genesis - Live Thoughts" powershell -NoExit -Command "Get-Content -Path 'data\genesis_thoughts.log' -Wait -Tail 40"
 
 python src/main.py --open-only --live
 

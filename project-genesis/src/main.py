@@ -230,6 +230,51 @@ _LIVE_COMMANDS = {
     "inferences", "status", "save", "learn",
 }
 
+_THOUGHT_LOG_PATH = os.path.join("data", "genesis_thoughts.log")
+
+
+class _ThoughtLog:
+    """
+    Genesis's background stream of thought, written to a file instead of the
+    conversation terminal.
+
+    Live mode runs two views: the foreground terminal is for talking with
+    Genesis (calm, easy to type into), and this log is the continuous record
+    of what Genesis is processing, reading, and learning. The launchers open a
+    second window that tails this file so you can watch it think in real time —
+    but the thinking never floods the place where you type.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            self._f = open(path, "w", encoding="utf-8")
+            self._f.write("  Genesis — live stream of thought\n")
+            self._f.write("  (this window is read-only; talk to Genesis in the other window)\n\n")
+            self._f.flush()
+        except Exception:
+            self._f = None
+
+    def write(self, line: str = "") -> None:
+        if self._f is None:
+            return
+        try:
+            if line:
+                self._f.write(f"[{time.strftime('%H:%M:%S')}] {line}\n")
+            else:
+                self._f.write("\n")
+            self._f.flush()
+        except Exception:
+            pass
+
+    def close(self) -> None:
+        if self._f is not None:
+            try:
+                self._f.close()
+            except Exception:
+                pass
+
 
 def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     """
@@ -279,9 +324,18 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     _STATUS_EVERY = 30    # live status line every N cycles
     _CYCLE_SLEEP  = 0.02  # seconds between cycles (≈50 cycles/sec max)
 
+    # Background stream of thought goes to a file so it never floods the
+    # terminal you type into. A second window (opened by the launchers) tails it.
+    think = _ThoughtLog(_THOUGHT_LOG_PATH)
+
     print()
-    print("  Genesis is running.")
-    print("  Type to talk. Commands: quit  summary  books  curiosity  status  save  learn")
+    print("  Genesis is awake and thinking.")
+    print(f"  Its thoughts stream to:  {_THOUGHT_LOG_PATH}")
+    print("  (the launcher opens a second window showing that live.)")
+    print()
+    print("  This window is for talking. Just type — Genesis keeps thinking")
+    print("  in the background and answers when you speak.")
+    print("  Commands: quit  summary  books  curiosity  status  save  learn")
     print()
 
     # Use a clean prefix in live mode — overrides the default "[Genesis] "
@@ -294,8 +348,10 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     cycles        = 0
     last_fetch    = 0
     last_save     = time.time()
+    last_pulse    = time.time()
     current_topic = "—"   # tracks what Genesis is currently reading about
     _AUTOSAVE_INTERVAL = 120.0  # auto-save every 2 minutes
+    _PULSE_INTERVAL    = 90.0   # quiet foreground "still here" pulse
 
     try:
         while not stop_evt.is_set():
@@ -398,16 +454,16 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                 continue
             cycles += 1
 
-            # ── status heartbeat: show what Genesis is processing ───
+            # ── status heartbeat → thought log (not the chat terminal) ──
             if cycles % _STATUS_EVERY == 0:
                 data = item.get("data", "")
                 snippet = (data if isinstance(data, str) else str(data))[:55].replace("\n", " ").strip()
                 rel_count = brain.relations.stats().get("total_relations", 0)
-                novel_tag = " ★" if result.get("novel") else ""
-                print(f"  · [{cycles:>5}]{novel_tag} \"{snippet}\"")
-                print(f"           reading: {current_topic}  |  relations: {rel_count}")
+                novel_tag = " *" if result.get("novel") else ""
+                think.write(f"[{cycles:>6}]{novel_tag} processing: \"{snippet}\"")
+                think.write(f"          reading: {current_topic}  |  relations: {rel_count}")
 
-            # ── 3. Periodic curiosity fetch ─────────────────────────
+            # ── 3. Periodic curiosity fetch → thought log ───────────
             if cycles - last_fetch >= _FETCH_EVERY:
                 try:
                     curiosity = brain.curiosity_report()
@@ -415,7 +471,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                                if not r.get("already_fetched")]
                     if targets:
                         current_topic = targets[0]
-                        print(f"\n  → reading about: {', '.join(targets)}")
+                        think.write(f"→ reading about: {', '.join(targets)}")
                     report = brain.fetch_knowledge(n_topics=fetch_topics, verbose=False)
                     new_inf = brain.inference.run(session_id=brain.session_id)
                     rel_added = report.get("relations_added", 0)
@@ -425,9 +481,9 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                             parts.append(f"+{rel_added} relations")
                         if new_inf > 0:
                             parts.append(f"+{new_inf} inferences")
-                        print(f"  → learned: {', '.join(parts)}\n")
+                        think.write(f"→ learned: {', '.join(parts)}")
                 except Exception as e:
-                    print(f"\n  [fetch error: {e}]\n")
+                    think.write(f"[fetch error: {e}]")
                 last_fetch = cycles
 
             # ── 4. Periodic auto-save ───────────────────────────────
@@ -435,9 +491,17 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
             if now - last_save >= _AUTOSAVE_INTERVAL:
                 try:
                     brain.save_session()
+                    think.write("(auto-saved)")
                 except Exception:
                     pass
                 last_save = now
+
+            # ── 5. Quiet foreground pulse so the chat window feels alive ─
+            if now - last_pulse >= _PULSE_INTERVAL:
+                rel_count = brain.relations.stats().get("total_relations", 0)
+                print(f"\r  · still here — thinking ({cycles} cycles, "
+                      f"{rel_count} relations). type anytime.", flush=True)
+                last_pulse = now
 
             time.sleep(_CYCLE_SLEEP)
 
@@ -446,6 +510,8 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     finally:
         stop_evt.set()
         brain.save_session()
+        think.write("Session saved. Genesis resting.")
+        think.close()
         print("\n  Session saved. Genesis resting.")
 
 
@@ -961,6 +1027,7 @@ def main():
     fetch_topics = 5
     snapshot_label = None
     memory_size = 500
+    memory_limit_mb = 2048   # survival RSS ceiling; must fit the offline corpus
 
     args = sys.argv[1:]
     i = 0
@@ -1020,6 +1087,17 @@ def main():
                 i += 1
             except (ValueError, IndexError):
                 pass
+        elif arg.startswith("--memory-limit="):
+            try:
+                memory_limit_mb = int(arg.split("=")[1])
+            except ValueError:
+                pass
+        elif arg == "--memory-limit" and i + 1 < len(args):
+            try:
+                memory_limit_mb = int(args[i + 1])
+                i += 1
+            except (ValueError, IndexError):
+                pass
         i += 1
 
     # M13: Output channel selection
@@ -1031,7 +1109,7 @@ def main():
 
     brain = Orchestrator(
         verbose=verbose, resume=resume, channel=channel,
-        working_capacity=memory_size,
+        working_capacity=memory_size, memory_limit_mb=memory_limit_mb,
     )
 
     if resume and brain.curriculum.current_stage == Stage.OPEN:

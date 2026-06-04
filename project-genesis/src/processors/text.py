@@ -64,14 +64,28 @@ _STOPWORDS = {
 }
 
 # Relation extraction patterns: (regex, relation_type, confidence)
-# Matched against lowercased sentence text.
+# Matched against lowercased sentence text. Order matters — the first
+# matching pattern wins (one relation per sentence). Classification
+# patterns come first so a definition like "X refers to Y that produces Z"
+# extracts the clean IS_A, not a spurious CAUSES from "produces".
 _RELATION_PATTERNS: list[tuple[str, str, float]] = [
+    # Classification (highest priority — clean, unambiguous)
+    (r"(.+?)\s+(?:is a|is an|are a|are an)\s+(.+)",            "IS_A",     0.88),
+    (r"(.+?)\s+(?:refers to|means|defined as)\s+(.+)",         "IS_A",     0.82),
+    (r"(.+?)\s+(?:is part of|are part of)\s+(.+)",             "IS_A",     0.70),
+    # Composition
+    (r"(.+?)\s+(?:contains?|consists? of|comprises?|made of|made up of)\s+(.+)", "CONTAINS", 0.80),
+    # Dependency
+    (r"(.+?)\s+(?:requires?|needs?)\s+(.+)",                   "REQUIRES", 0.82),
+    (r"(.+?)\s+(?:depends? on|relies? on)\s+(.+)",             "REQUIRES", 0.85),
     # Causation
     (r"(.+?)\s+(?:caused?|causes?)\s+(.+)",                   "CAUSES",   0.88),
     (r"(.+?)\s+(?:led to|leads to)\s+(.+)",                   "CAUSES",   0.88),
     (r"(.+?)\s+(?:resulted? in|results? in)\s+(.+)",           "CAUSES",   0.85),
     (r"(.+?)\s+(?:triggered?|triggers?)\s+(.+)",               "CAUSES",   0.82),
     (r"(.+?)\s+(?:produced?|produces?)\s+(.+)",                "CAUSES",   0.75),
+    (r"(.+?)\s+(?:is responsible for|are responsible for)\s+(.+)",     "CAUSES",   0.75),
+    (r"(.+?)\s+(?:destroys?|kills?|eliminates?)\s+(.+)",               "CAUSES",   0.80),
     # Control / regulation
     (r"(.+?)\s+(?:controls?|regulates?)\s+(.+)",               "CONTROLS", 0.85),
     (r"(.+?)\s+(?:manages?|governs?|shapes?)\s+(.+)",          "CONTROLS", 0.78),
@@ -79,37 +93,21 @@ _RELATION_PATTERNS: list[tuple[str, str, float]] = [
     # Prevention
     (r"(.+?)\s+(?:prevents?|stops?|blocked?|blocks?)\s+(.+)", "PREVENTS", 0.85),
     (r"(.+?)\s+(?:suppressed?|suppresses?)\s+(.+)",            "PREVENTS", 0.80),
+    (r"(.+?)\s+(?:protects?|defends?)\s+(.+)",                 "PREVENTS", 0.72),
     # Enablement
     (r"(.+?)\s+(?:enables?|allows?|permitted?|permits?)\s+(.+)", "ENABLES", 0.82),
     (r"(.+?)\s+(?:supported?|supports?|facilitated?)\s+(.+)", "ENABLES",  0.75),
-    # Dependency
-    (r"(.+?)\s+(?:requires?|needs?)\s+(.+)",                   "REQUIRES", 0.82),
-    (r"(.+?)\s+(?:depends? on|relies? on)\s+(.+)",             "REQUIRES", 0.85),
-    # Classification
-    (r"(.+?)\s+(?:is a|is an|are a|are an)\s+(.+)",            "IS_A",     0.88),
-    (r"(.+?)\s+(?:refers to|means|defined as)\s+(.+)",         "IS_A",     0.82),
+    (r"(.+?)\s+(?:is used (?:for|to|in|as))\s+(.+)",          "ENABLES",  0.72),
+    (r"(.+?)\s+(?:provides?|supply|supplies)\s+(.+)",          "ENABLES",  0.68),
     # Predation / consumption
     (r"(.+?)\s+(?:eats?|feeds? on|preys? on|hunts?)\s+(.+)",   "PREDATES", 0.88),
-    # Effect / impact
+    # Effect / impact / involvement
     (r"(.+?)\s+(?:increased?|decreased?|reduced?|elevated?)\s+(.+)", "AFFECTS", 0.72),
     (r"(.+?)\s+(?:affected?|affects?|influenced?|influences?)\s+(.+)", "AFFECTS", 0.75),
-    # Composition
-    (r"(.+?)\s+(?:contains?|consists? of|comprises?|made of|made up of)\s+(.+)", "CONTAINS", 0.80),
-    # Involvement / participation (academic prose)
     (r"(.+?)\s+(?:is involved in|are involved in)\s+(.+)",             "AFFECTS",  0.72),
     (r"(.+?)\s+(?:plays? (?:a|an) (?:\w+ )?role in)\s+(.+)",          "AFFECTS",  0.70),
-    (r"(.+?)\s+(?:is responsible for|are responsible for)\s+(.+)",     "CAUSES",   0.75),
-    # Usage / purpose
-    (r"(.+?)\s+(?:is used (?:for|to|in|as))\s+(.+)",                  "ENABLES",  0.72),
-    (r"(.+?)\s+(?:provides?|supply|supplies)\s+(.+)",                  "ENABLES",  0.68),
-    # Association
     (r"(.+?)\s+(?:is associated with|are associated with)\s+(.+)",     "AFFECTS",  0.65),
     (r"(.+?)\s+(?:is related to|are related to)\s+(.+)",               "AFFECTS",  0.62),
-    # Part-whole
-    (r"(.+?)\s+(?:is part of|are part of)\s+(.+)",                     "IS_A",     0.70),
-    # Destruction / protection
-    (r"(.+?)\s+(?:destroys?|kills?|eliminates?)\s+(.+)",               "CAUSES",   0.80),
-    (r"(.+?)\s+(?:protects?|defends?)\s+(.+)",                         "PREVENTS", 0.72),
 ]
 
 # Modal verbs signal hypothesis
@@ -359,6 +357,11 @@ def _extract_relations(sentence: str) -> tuple[list[dict], list[str]]:
                 markers_found.append(marker)
                 break
 
+        # One relation per sentence — the highest-priority matching pattern
+        # wins. This prevents a single sentence from spawning overlapping,
+        # mangled triples (e.g. "force refers to", "force refers", "force").
+        break
+
     return relations, markers_found
 
 
@@ -405,7 +408,13 @@ def _clean_concept(raw: str) -> str:
     result = " ".join(words).lower().strip()
     # Remove non-alphanumeric except spaces
     result = re.sub(r"[^a-z0-9 ]", "", result).strip()
-    return result if len(result) >= 2 else ""
+    if len(result) < 2:
+        return ""
+    # Reject concepts with no real word — strips numeric/OCR junk like
+    # "50 6 my" or "38 26" that leaks from verse numbers and tables.
+    if not any(len(tok) >= 3 and tok.isalpha() for tok in result.split()):
+        return ""
+    return result
 
 
 def _build_context(
