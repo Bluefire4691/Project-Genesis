@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
 
 
-# Relation type → natural language verb phrase
+# Relation type → natural language verb phrase (finite, for "X <verb> Y")
 _REL_VERBS: dict[str, str] = {
     "CAUSES":   "causes",
     "CONTROLS": "controls",
@@ -55,6 +55,20 @@ _REL_VERBS: dict[str, str] = {
     "PREDATES": "preys on",
     "AFFECTS":  "affects",
     "CONTAINS": "contains",
+}
+
+# Base (infinitive) form, for phrasings like "appears to <verb>" where the
+# finite form would be ungrammatical ("appears to is a type of").
+_REL_VERBS_BASE: dict[str, str] = {
+    "CAUSES":   "cause",
+    "CONTROLS": "control",
+    "PREVENTS": "prevent",
+    "ENABLES":  "enable",
+    "REQUIRES": "require",
+    "IS_A":     "be a type of",
+    "PREDATES": "prey on",
+    "AFFECTS":  "affect",
+    "CONTAINS": "contain",
 }
 
 # Approximately 1 in N cycles may produce a spontaneous expression
@@ -138,79 +152,192 @@ class GenesisVoice:
         """
         Receive user input, learn from it, and produce a conversational reply.
 
-        Genesis does two things simultaneously:
-          1. Processes the text as new knowledge (always learns from conversation)
-          2. Searches its existing knowledge for what it knows about the concepts
-             mentioned, and replies from that — not from a template, from its
-             actual processing history.
+        Genesis does two things at once: it processes the text as new knowledge
+        (it always learns from the conversation), and it answers from its own
+        processing history — never a template. The reply is shaped by what the
+        person is actually asking:
 
-        Returns a non-empty response string.
+          - "what have you been thinking about?" → its latest reflection
+          - "what are you curious about?"        → its real curiosity frontier
+          - "what do you know?"                  → an honest overview + an example
+          - mentions a concept it knows          → what it has worked out about it
+          - tells it something new               → it takes it in, then shares a
+                                                    thought or a question of its own
+
+        Everything is drawn from clean sources (the relation graph, inferences,
+        reflections) — no mangled memory keys, no raw relation-type tokens.
         """
-        # Learn from what was said
+        # Always learn from what was said.
         result = self._brain.process_input("text", user_text)
-        novel   = result.get("novel", False)
+        novel    = result.get("novel", False)
         wm_delta = result.get("wm_delta", 0)
 
-        # Extract concepts the user mentioned, prioritising ones Genesis already knows
+        text = user_text.lower().strip()
+
+        # ── Intent: open questions about Genesis's own mind ──────────────
+        if re.match(r"^\s*(hi|hello|hey|yo|hiya|greetings|howdy|"
+                    r"good\s+(morning|afternoon|evening))\b", text):
+            return f"Hello. {self._say_thoughts()}"
+
+        if re.search(r"think(ing)?\s+about|on your mind|what.*you.*think|"
+                     r"been thinking|been up to|what'?s new", text):
+            return self._say_thoughts()
+
+        if re.search(r"curious|want to learn|wonder(ing)?|like to know|"
+                     r"trying to (learn|understand|figure)", text):
+            return self._say_curiosity()
+
+        if re.search(r"what do you know|what have you learned|what do you "
+                     r"understand|tell me what you know|how much do you know", text):
+            return self._say_knowledge_overview()
+
+        # ── Intent: about a specific concept it knows ───────────────────
         concepts = self._extract_input_concepts(user_text)
-
         parts: list[str] = []
-
-        # Acknowledge genuinely new input
-        if novel and wm_delta > 0 and not concepts:
-            parts.append("That's new to me. I've taken it in.")
-
-        # Reply about each concept mentioned (up to 2)
-        responded: set[str] = set()
         for concept in concepts[:2]:
-            if concept in responded:
-                continue
-            responded.add(concept)
+            stmt = self._compose_about(concept)
+            if stmt:
+                parts.append(stmt)
+        if parts:
+            # Offer a thread to pull on, so the exchange keeps going.
+            follow = self._curiosity_question(exclude=set(concepts))
+            if follow and len(parts) < 2:
+                parts.append(follow)
+            return " ".join(parts)
 
-            # Inferences are the most interesting thing to share
-            inf = self._brain.inference.query(concept)
-            if inf["as_subject"]:
-                entry = inf["as_subject"][0]
-                verb = _REL_VERBS.get(entry["relation"], entry["relation"].lower())
-                obj  = entry["object"].replace("_", " ")
-                parts.append(
-                    f"I've worked out that {concept} {verb} {obj} — "
-                    f"I arrived at that across {entry['chain_length']} step(s)."
-                )
-                continue
+        # ── New / unfamiliar input ──────────────────────────────────────
+        if novel or wm_delta > 0:
+            opener = "That's new to me — I've taken it in and I'm connecting it up."
+        else:
+            opener = "I've heard things like that before."
+        thread = self._curiosity_question() or self._say_thoughts()
+        return f"{opener} {thread}".strip()
 
-            # Direct relations
-            outgoing = self._brain.relations.query_subject(concept, min_confidence=0.5)
+    # ------------------------------------------------------------------
+    # Conversational helpers — grounded, clean, first-person
+    # ------------------------------------------------------------------
+
+    def _latest_reflection(self) -> Optional[dict]:
+        """Latest reflection, or None if consolidation isn't available."""
+        fn = getattr(self._brain, "latest_reflection", None)
+        if not callable(fn):
+            return None
+        try:
+            return fn()
+        except Exception:
+            return None
+
+    def _say_thoughts(self) -> str:
+        """What Genesis has been thinking about — from its latest reflection."""
+        latest = self._latest_reflection()
+        if latest and latest.get("summary"):
+            return latest["summary"]
+        names = [self._clean(c["concept"])
+                 for c in self._brain.relations.most_connected(limit=6)
+                 if self._is_clean(c["concept"])][:3]
+        if names:
+            return (f"Lately I've been building up what I know about "
+                    f"{self._english_list(names)}.")
+        return "I'm still early in my thinking — not much is on my mind yet."
+
+    def _say_curiosity(self) -> str:
+        """What Genesis genuinely wants to learn — from its curiosity frontier."""
+        gaps = self._open_gaps()
+        if not gaps:
+            return ("Right now I'm turning over what I already have rather than "
+                    "reaching for something new.")
+        # A few, in varied order, so it doesn't fixate on the same word.
+        self._rng.shuffle(gaps)
+        pick = gaps[:3]
+        if len(pick) == 1:
+            return (f"I'm curious about {pick[0]} right now — I keep meeting it "
+                    f"but can't fully explain it yet. Do you know much about it?")
+        return (f"I'm curious about {self._english_list(pick)} right now — I keep "
+                f"meeting them but can't fully explain them yet. "
+                f"Do you know much about any of those?")
+
+    def _open_gaps(self) -> list:
+        """Clean concepts from the curiosity frontier Genesis hasn't explained."""
+        out: list = []
+        for r in self._brain.curiosity_report():
+            if r.get("already_fetched"):
+                continue
+            c = self._clean(r["concept"])
+            if self._is_clean(c) and c not in out:
+                out.append(c)
+        return out
+
+    def _say_knowledge_overview(self) -> str:
+        """An honest account of what Genesis knows: a reflection, an example, a scale."""
+        parts: list[str] = [self._say_thoughts()]
+        fact = self._one_clean_fact()
+        if fact:
+            parts.append(fact)
+        rel_total = self._brain.relations.stats().get("total_relations", 0)
+        inf_total = self._brain.inference.stats().get("total_inferences", 0)
+        if rel_total:
+            tail = f"All told I've connected about {rel_total} things"
+            if inf_total:
+                tail += f", and worked out {inf_total} of my own conclusions"
+            parts.append(tail + ".")
+        return " ".join(p for p in parts if p)
+
+    def _curiosity_question(self, exclude: Optional[set] = None) -> Optional[str]:
+        """A short question about something Genesis can't yet explain."""
+        exclude = {self._clean(e) for e in (exclude or set())}
+        gaps = [g for g in self._open_gaps() if g not in exclude]
+        if not gaps:
+            return None
+        c = self._rng.choice(gaps[:6])
+        return f"I'm still trying to understand {c} — do you know anything about it?"
+
+    def _one_clean_fact(self) -> Optional[str]:
+        """A single clean, high-confidence relation worth sharing as an example."""
+        for c in self._brain.relations.most_connected(limit=10):
+            concept = c["concept"]
+            if not self._is_clean(concept):
+                continue
+            outgoing = [r for r in
+                        self._brain.relations.query_subject(concept, min_confidence=0.7)
+                        if self._is_clean(r["object"])]
             if outgoing:
-                rel  = self._rng.choice(outgoing[:3])
+                rel = outgoing[0]
                 verb = _REL_VERBS.get(rel["relation"], rel["relation"].lower())
-                obj  = rel["object"].replace("_", " ")
-                parts.append(f"I know that {concept} {verb} {obj}.")
-            else:
-                # Genesis has heard of it but knows little
-                parts.append(
-                    f"I've come across {concept} before, "
-                    f"but I haven't formed strong connections around it yet."
-                )
+                return (f"For instance, I've learned that {self._clean(concept)} "
+                        f"{verb} {self._clean(rel['object'])}.")
+        return None
 
-        # Add a curiosity question to keep the exchange going (randomised gap)
-        if len(parts) < 2:
-            curiosity = self._brain.curiosity_report()
-            gaps = [c for c in curiosity if not c.get("already_fetched")]
-            if gaps:
-                pick = self._rng.choice(gaps[:5])
-                topic = pick["concept"]
-                parts.append(
-                    f"I'm still trying to understand {topic}. "
-                    f"Do you know anything about it?"
-                )
+    @staticmethod
+    def _clean(s: str) -> str:
+        """Normalise a concept for display: underscores to spaces, trimmed."""
+        return (s or "").replace("_", " ").strip()
 
-        if not parts:
-            # Last resort: share whatever is most salient right now
-            stmt = self._compose_for_trigger(None)
-            return stmt or "I'm processing what you've said — my understanding is still forming."
+    @staticmethod
+    def _is_clean(s: str) -> bool:
+        """
+        True if a concept reads as real language, not extraction noise.
 
-        return " ".join(parts)
+        Rejects digits, over-long phrases, and concatenated/mangled tokens
+        (e.g. "withoutthoseplants") that leaked from stripped memory keys.
+        """
+        s = (s or "").replace("_", " ").strip()
+        if not s or any(ch.isdigit() for ch in s):
+            return False
+        toks = s.split()
+        if len(toks) > 3 or any(len(t) > 18 for t in toks):
+            return False
+        return any(len(t) >= 3 for t in toks)
+
+    @staticmethod
+    def _english_list(items: list) -> str:
+        items = [i for i in items if i]
+        if not items:
+            return ""
+        if len(items) == 1:
+            return items[0]
+        if len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return ", ".join(items[:-1]) + f", and {items[-1]}"
 
     # ------------------------------------------------------------------
     # Concept extraction helper
@@ -345,20 +472,25 @@ class GenesisVoice:
         return f"I have learned that {subj} {verb} {obj}."
 
     def _compose_attention(self) -> Optional[str]:
-        """Express what Genesis is most preoccupied with right now."""
-        wm = self._brain.memory.memories
-        if not wm:
-            return None
-        top = sorted(wm.items(), key=lambda kv: kv[1].relevance, reverse=True)
-        if not top:
-            return None
-        key, mem = top[0]
-        # Extract readable concept from key
-        concept = re.sub(r"^[a-z]+:", "", key).replace("_", " ").strip()
-        if not concept:
-            return None
-        snippet = mem.context[:60].rstrip()
-        return f"I have been thinking about {concept}. {snippet}."
+        """
+        Express what Genesis is most preoccupied with right now.
+
+        Prefers its latest reflection (its own account of what mattered), then
+        the most-connected clean concept in the graph. Never reads from raw
+        memory keys or context snippets — those carry stripped, mangled text
+        and raw relation tokens that don't belong in speech.
+        """
+        latest = self._latest_reflection()
+        if latest and latest.get("salient"):
+            names = [self._clean(s["concept"]) for s in latest["salient"][:3]
+                     if self._is_clean(s["concept"])]
+            if names:
+                return f"I have been thinking about {self._english_list(names)}."
+
+        for c in self._brain.relations.most_connected(limit=8):
+            if self._is_clean(c["concept"]):
+                return f"I have been thinking about {self._clean(c['concept'])}."
+        return None
 
     def _compose_question(self) -> Optional[str]:
         """Express curiosity about an unresolved concept."""
@@ -413,19 +545,21 @@ class GenesisVoice:
         inf = self._brain.inference.query(norm)
         if inf["as_subject"]:
             entry = inf["as_subject"][0]
-            verb = _REL_VERBS.get(entry["relation"], entry["relation"].lower())
-            obj = entry["object"].replace("_", " ")
+            verb = _REL_VERBS_BASE.get(entry["relation"], entry["relation"].lower())
+            obj = self._clean(entry["object"])
             return (
                 f"From what I have processed, {norm} appears to {verb} {obj}. "
-                f"I derived this across {entry['chain_length']} steps."
+                f"I worked that out across {entry['chain_length']} steps."
             )
 
-        # Fall back to direct relations
+        # Fall back to direct relations — prefer a clean object to talk about
         outgoing = self._brain.relations.query_subject(norm, min_confidence=0.5)
-        if outgoing:
-            rel = outgoing[0]
+        clean_out = [r for r in outgoing if self._is_clean(r["object"])]
+        chosen = clean_out or outgoing
+        if chosen:
+            rel = chosen[0]
             verb = _REL_VERBS.get(rel["relation"], rel["relation"].lower())
-            obj = rel["object"].replace("_", " ")
+            obj = self._clean(rel["object"])
             return f"I have learned that {norm} {verb} {obj}."
 
         return f"I have encountered {norm} but have not formed strong connections around it yet."
