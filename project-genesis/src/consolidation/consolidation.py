@@ -32,10 +32,13 @@ in keeping with total retention):
                     sessions, so Genesis has a record of what it has been
                     thinking about. This is continuity you can read back.
 
-The salience weights below are deliberately simple. They are not a curriculum:
-they only say *how to listen* to Genesis's own signals. Two instances given the
-same weights but different histories will surface entirely different concepts —
-which is exactly the individuality the project is after.
+The salience weights start from the defaults below but are adapted after each
+reflection: if a signal was a reliable predictor of continued growth in the
+previous window, its weight is nudged up; if it consistently flagged concepts
+that then stagnated, it is nudged down. The weights are instance-specific and
+persist across sessions — so two Genesis instances with different histories
+develop different intuitions about *how to pay attention to their own signals*.
+This is the deepest form of individuality the architecture can express.
 """
 
 import json
@@ -51,12 +54,22 @@ if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
 
 
-# How Genesis weighs its own signals when deciding what mattered. These shape
-# *attention to its own history*, not what it is allowed to find interesting.
+# Default salience weights — starting point for every new instance.
+# These are adapted over time by each instance based on which signals actually
+# predicted continued growth in *its* history. Different processing histories
+# produce different adapted weights: an instance that encounters lots of
+# contradiction will find tension more predictive and raise its weight;
+# one in a more consistent domain will find growth more reliable.
 _W_GROWTH    = 3.0    # relations built since the last reflection
-_W_DEGREE    = 0.5    # overall centrality (log-scaled)
+_W_DEGREE    = 0.5    # overall centrality (log-scaled — not adapted, structural)
 _W_INFERENCE = 2.0    # concepts it reasoned from
 _W_TENSION   = 1.5    # concepts it found contradictions about
+
+# Adaptation parameters
+_W_DELTA     = 0.05   # per-reflection nudge amount
+_W_MIN       = 0.10   # floor: no signal is ever fully silenced
+_W_MAX       = 6.00   # ceiling: no signal dominates catastrophically
+_W_MIN_DATA  = 3      # minimum salient concepts required to adapt
 
 _SKIP = {
     "the", "and", "for", "with", "that", "this", "from", "are", "was", "were",
@@ -104,6 +117,13 @@ class ConsolidationEngine:
         self._init_schema()
         # Reflect only on what changed since the last reflection.
         self._last_ts = self._latest_reflection_ts()
+        # Instance-specific salience weights — start from defaults, adapt over time.
+        # Loaded from DB so they persist: this instance's sense of what matters
+        # evolves across sessions.
+        self._w_growth    = self._load_weight("w_growth",    _W_GROWTH)
+        self._w_degree    = _W_DEGREE   # structural, not adapted
+        self._w_inference = self._load_weight("w_inference", _W_INFERENCE)
+        self._w_tension   = self._load_weight("w_tension",   _W_TENSION)
 
     # ------------------------------------------------------------------
     # Schema
@@ -125,6 +145,13 @@ class ConsolidationEngine:
             "CREATE INDEX IF NOT EXISTS idx_reflections_time "
             "ON reflections(created_at DESC)"
         )
+        # Persistent key-value store for adapted weights and other state.
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS consolidation_state (
+                key   TEXT PRIMARY KEY,
+                value REAL NOT NULL
+            )
+        """)
         self._conn.commit()
 
     def _latest_reflection_ts(self) -> float:
@@ -160,6 +187,9 @@ class ConsolidationEngine:
 
     def _consolidate(self, cycle: int, top_k: int) -> dict:
         now = time.time()
+        # Adapt weights before scoring — learn from whether last reflection's
+        # predictions were vindicated by actual growth in the new window.
+        self._adapt_weights()
         salience = self._gather_salience()
 
         ranked = sorted(
@@ -254,10 +284,10 @@ class ConsolidationEngine:
             i = inference.get(c, 0)
             t = tension.get(c, 0)
             score = (
-                _W_GROWTH * g
-                + _W_DEGREE * math.log1p(d)
-                + _W_INFERENCE * i
-                + _W_TENSION * t
+                self._w_growth * g
+                + self._w_degree * math.log1p(d)
+                + self._w_inference * i
+                + self._w_tension * t
             )
             if score <= 0:
                 continue
@@ -292,6 +322,127 @@ class ConsolidationEngine:
             return {r[0]: r[1] for r in rows if r[0]}
         except Exception:
             return {}
+
+    # ------------------------------------------------------------------
+    # Adaptive weights — Genesis tuning its own salience formula
+    # ------------------------------------------------------------------
+
+    def _adapt_weights(self) -> None:
+        """
+        Nudge salience weights based on whether the previous reflection's
+        predictions were vindicated by actual growth in the new window.
+
+        For each signal (growth, inference, tension): look at the concepts
+        the last reflection flagged with that signal. Did those concepts
+        actually grow (acquire new relations) in the window since that
+        reflection? If yes more than half the time, nudge the weight up.
+        If not, nudge it down.
+
+        This makes the consolidation engine self-calibrating: over many
+        reflections, each instance converges on the signal mix that best
+        predicts *its own* continued development. Two instances with
+        different histories end up with different intuitions about what
+        to pay attention to.
+
+        Never raises — a failed adaptation is silently skipped.
+        """
+        try:
+            prev = self._prev_reflection()
+            if not prev:
+                return
+            prev_salient = prev.get("salient", [])
+            if len(prev_salient) < _W_MIN_DATA:
+                return
+            since_ts = prev.get("created_at", 0.0)
+
+            correct: dict[str, int] = {"growth": 0, "inference": 0, "tension": 0}
+            total: dict[str, int]   = {"growth": 0, "inference": 0, "tension": 0}
+
+            for entry in prev_salient:
+                concept = entry["concept"]
+                # Did this concept acquire new relations after the last reflection?
+                new_rels = self._new_relations_for(concept, since_ts)
+                grew = new_rels > 0
+                for sig in ("growth", "inference", "tension"):
+                    if entry.get(sig, 0) > 0:
+                        total[sig] += 1
+                        if grew:
+                            correct[sig] += 1
+
+            weight_attrs = {
+                "growth":    "_w_growth",
+                "inference": "_w_inference",
+                "tension":   "_w_tension",
+            }
+            changed = False
+            for sig, attr in weight_attrs.items():
+                if total[sig] < 2:
+                    continue  # too few data points to learn from
+                accuracy = correct[sig] / total[sig]
+                nudge = _W_DELTA if accuracy > 0.5 else -_W_DELTA
+                current = getattr(self, attr)
+                new_val = round(max(_W_MIN, min(_W_MAX, current + nudge)), 4)
+                if new_val != current:
+                    setattr(self, attr, new_val)
+                    changed = True
+
+            if changed:
+                self._save_weights()
+        except Exception:
+            pass
+
+    def _new_relations_for(self, concept: str, since_ts: float) -> int:
+        """Count relations added for `concept` (as subject or object) after `since_ts`."""
+        try:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM relations "
+                "WHERE (LOWER(subject)=? OR LOWER(object)=?) AND created_at > ?",
+                (concept, concept, since_ts),
+            ).fetchone()
+            return row[0] if row else 0
+        except Exception:
+            return 0
+
+    def _prev_reflection(self) -> Optional[dict]:
+        """The reflection before the most recent one (used for adaptation)."""
+        try:
+            rows = self._conn.execute(
+                "SELECT created_at, salient FROM reflections "
+                "ORDER BY created_at DESC LIMIT 2"
+            ).fetchall()
+        except Exception:
+            return None
+        if len(rows) < 2:
+            return None
+        row = rows[1]  # second-most-recent
+        return {"created_at": row[0], "salient": json.loads(row[1])}
+
+    def _load_weight(self, key: str, default: float) -> float:
+        """Load a persisted weight value, or return the default if not found."""
+        try:
+            row = self._conn.execute(
+                "SELECT value FROM consolidation_state WHERE key=?", (key,)
+            ).fetchone()
+            return float(row[0]) if row else default
+        except Exception:
+            return default
+
+    def _save_weights(self) -> None:
+        """Persist the current adapted weights to the DB."""
+        try:
+            for key, val in [
+                ("w_growth",    self._w_growth),
+                ("w_inference", self._w_inference),
+                ("w_tension",   self._w_tension),
+            ]:
+                self._conn.execute(
+                    "INSERT INTO consolidation_state(key, value) VALUES(?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (key, val),
+                )
+            self._conn.commit()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Reflection text — first person, grounded in what actually happened
@@ -399,4 +550,21 @@ class ConsolidationEngine:
             ).fetchone()[0]
         except Exception:
             total = 0
-        return {"total_reflections": total}
+        return {
+            "total_reflections": total,
+            "weights": {
+                "growth":    round(self._w_growth, 4),
+                "degree":    round(self._w_degree, 4),
+                "inference": round(self._w_inference, 4),
+                "tension":   round(self._w_tension, 4),
+            },
+        }
+
+    def current_weights(self) -> dict:
+        """The current adapted salience weights for this instance."""
+        return {
+            "growth":    round(self._w_growth, 4),
+            "degree":    round(self._w_degree, 4),
+            "inference": round(self._w_inference, 4),
+            "tension":   round(self._w_tension, 4),
+        }
