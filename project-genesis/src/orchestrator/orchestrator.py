@@ -122,6 +122,12 @@ class Orchestrator:
         from cognition.belief_revision import BeliefRevision
         self.belief_revision = BeliefRevision(_conn)
 
+        # M19: Spreading activation — ACT-R associative retrieval.
+        # When concepts are active in working memory, graph-adjacent concepts
+        # receive a retrieval boost. Makes search associative, not just lexical.
+        from cognition.spreading_activation import SpreadingActivation
+        self.spreading_activation = SpreadingActivation(self.relations)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -605,7 +611,19 @@ class Orchestrator:
             return {"answer": "System under resource pressure — memory search unavailable.",
                     "memories_used": 0}
 
-        results = self.memory.search(question, top_k=5)
+        # M19: compute spreading activation from current attention before searching.
+        # Concepts currently in working memory prime their graph-neighbors so that
+        # associatively related memories surface even without keyword overlap.
+        activation = {}
+        try:
+            attention = self.memory._working._context_terms
+            if attention:
+                sources = {t: 1.0 for t in attention[:8]}
+                activation = self.spreading_activation.compute(sources)
+        except Exception:
+            pass
+
+        results = self.memory.search(question, top_k=5, activation_boost=activation or None)
 
         # Also check relation graph for any known concept
         query_words = [w for w in question.lower().split() if len(w) >= 3]
@@ -627,7 +645,12 @@ class Orchestrator:
 
         if not results and not known_relations:
             return {"answer": "I don't have enough experience to answer that.",
-                    "memories_used": 0, "relations": []}
+                    "memories_used": 0, "relations": [],
+                    "primed_concepts": [{"concept": c, "activation": round(a, 3)}
+                                         for c, a in sorted(
+                                             activation.items(),
+                                             key=lambda kv: kv[1], reverse=True
+                                         )[:5]]}
 
         memories_used = []
         for key, mem in results:
@@ -639,11 +662,19 @@ class Orchestrator:
                 self._log(f"    ⟳ Relations for '{kr['concept']}': "
                           f"{len(kr['as_subject'])} outgoing, {len(kr['as_object'])} incoming")
 
+        # Surface top primed concepts so callers can see what was activated
+        primed = sorted(activation.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        if primed and self.verbose:
+            self._log(f"    💡 Primed by spreading activation: "
+                      f"{[c for c, _ in primed]}")
+
         return {
             "answer": f"Based on {len(results)} memories.",
             "memories_used": len(results),
             "relevant_memories": memories_used,
             "relations": known_relations,
+            "primed_concepts": [{"concept": c, "activation": round(a, 3)}
+                                 for c, a in primed],
         }
 
     # ------------------------------------------------------------------

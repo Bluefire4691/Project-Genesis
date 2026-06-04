@@ -148,14 +148,26 @@ class MemorySystem:
                 self._long_term.update_access(evict_key, evict_mem.access_count)
         return mem
 
-    def search(self, query: str, top_k: int = 5) -> list[tuple[str, Memory]]:
+    def search(self, query: str, top_k: int = 5,
+               activation_boost: dict | None = None) -> list[tuple[str, Memory]]:
         """
         Search memories by relevance to query.
 
         Uses FTS5 on the full SQLite corpus (not just working memory),
         then re-ranks by blending search score with attention context.
+
+        If `activation_boost` is provided (a spreading-activation map of
+        {concept: score}), memories whose content/context mentions an
+        activated concept receive an additional retrieval score bonus.
+        This enables associative retrieval: a query for "river change"
+        can surface memories about wolves (via the activation path
+        wolves→deer→overgrazing→erosion→rivers) without "wolves" ever
+        appearing in the query string.
+
         Top results are promoted into working memory.
         """
+        import re as _re
+
         # Search long-term (FTS5 / LIKE fallback, returns up to 3×top_k candidates)
         candidates = self._long_term.search(query, limit=top_k * 3)
 
@@ -169,10 +181,19 @@ class MemorySystem:
         def rank_score(key: str, mem: Memory) -> float:
             base = mem.relevance
             if ctx_set:
-                import re
-                words = set(re.findall(r"\b\w+\b", f"{mem.content} {mem.context}".lower()))
+                words = set(_re.findall(r"\b\w+\b", f"{mem.content} {mem.context}".lower()))
                 overlap = len(ctx_set & words)
                 base = base * 0.6 + min(1.0, overlap * 0.15) * 0.4
+
+            # Spreading activation boost: memories about graph-neighbors of
+            # currently attended concepts get a retrieval bonus even without
+            # keyword overlap with the query.
+            if activation_boost:
+                mem_words = set(_re.findall(r"\b[a-z]{3,}\b",
+                                            f"{mem.content} {mem.context}".lower()))
+                sa = max((activation_boost.get(w, 0.0) for w in mem_words), default=0.0)
+                base = min(1.0, base + sa * 0.35)
+
             return base
 
         candidates.sort(key=lambda kv: rank_score(kv[0], kv[1]), reverse=True)

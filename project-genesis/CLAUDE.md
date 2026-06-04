@@ -151,6 +151,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | M16 | ✅ | Processor voting: independent processor agreement boosts relation confidence (Hawkins — multiple columns voting raises certainty) |
 | M17 | ✅ | Active curiosity directives: high-pred-error concepts become persistent attention targets; AdaptiveStream scores directive items 2× higher; directives auto-resolve at 3+ relations; cross-session persistent (SOAR impasse→subgoal) |
 | M18 | ✅ | Belief revision: evidence-weighted contradiction resolution (REVISE/RESIST/TENSION); corroboration provenance ledger (independent sessions, not citation count); source trust tracks per-session reliability and cascades when a source is discredited (Wakefield principle); beliefs demoted to floor, never erased (total retention); full audit trail of what Genesis changed its mind about and why |
+| M19 | ✅ | Spreading activation: ACT-R associative retrieval — current attention window primes graph-adjacent concepts; BFS with decay-per-hop and confidence modulation; memory.search() accepts activation_boost; query() surfaces primed_concepts; makes retrieval associative not just lexical (Collins & Loftus 1975, Anderson 1983) |
 
 ---
 
@@ -186,7 +187,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 - **Never test implementation details of lower layers from higher-layer tests.** Test M1
   in `test_survival_*.py`. Test M4 in `test_orchestrator.py`. Don't reach across layers.
 - Run full suite before committing: `python -m pytest` from `project-genesis/`.
-  Currently: **769 tests, all passing.**
+  Currently: **803 tests, all passing.**
 
 ---
 
