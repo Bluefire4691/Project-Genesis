@@ -19,8 +19,13 @@ The three properties that make something an entity rather than a capability:
 
 2. **Self-authored consolidation** — an offline process that decides what matters based
    on the system's own internal signals, not the engineer's category scheme.
-   *Status: partially built (SessionManager, ArchiveStore). Gap: significance scoring
-   is still engineer-specified. Working-memory delta as salience signal is the next step.*
+   *Status: built (ConsolidationEngine, `src/consolidation/`). A periodic reflection
+   ("sleep") pass scores salience per concept from Genesis's own history — recent
+   relation growth (the persisted echo of working-memory delta), connectivity, what it
+   reasoned from, and where it found contradictions — then acts through attention
+   (strengthen the salient, fade the rest, delete nothing) and records a first-person
+   reflection that persists across sessions. The salience weights say only how to listen
+   to Genesis's own signals; they are not a curriculum.*
 
 3. **Accumulated individuality** — a perspective that develops over time and is specific
    to this instance. Two Genesis instances started from the same seed diverge purely
@@ -127,6 +132,8 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | M7 | ✅ | Relationship extraction, RelationGraph, typed semantic graph |
 | M8 | ✅ | Education data expansion: 119-item pool, 14 domains |
 | M9 | ✅ | AdaptiveStream: attention-weighted input selection, feedback loop |
+| — | ✅ | Self-directed ingestion: WordNet + corpus, curiosity frontier (graph gaps → vocabulary), never plateaus |
+| — | ✅ | ConsolidationEngine: self-authored reflection ("sleep"), salience from own signals, persists across sessions |
 | M10 | 🔲 | Inference engine: transitive chains, wm_delta salience, OOD detection |
 | M11 | 🔲 | Contradiction detection: conflicting relations flagged, not overwritten |
 | M12 | 🔲 | Ethics through experience: consequence sequences, requires M9 |
@@ -144,6 +151,8 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 | `src/memory/store.py` | LongTermStore, SQLite backend, exposes `.conn` |
 | `src/memory/archive.py` | ArchiveStore: domain-tagged cross-session reference |
 | `src/memory/relations.py` | RelationGraph: typed semantic graph, BFS path-finding |
+| `src/consolidation/consolidation.py` | ConsolidationEngine: self-authored reflection, salience scoring, reflection log |
+| `src/ingestion/` | Self-directed learning: CuriosityEngine, KnowledgeFeeder, WordNet, corpus |
 | `src/persistence/session.py` | SessionManager: save/restore brain state across sessions |
 | `src/curriculum/adaptive_stream.py` | AdaptiveStream: attention-weighted open-stage input |
 | `src/curriculum/open_stage.py` | 119-item open-stage pool across 14 domains |
@@ -165,7 +174,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 - **Never test implementation details of lower layers from higher-layer tests.** Test M1
   in `test_survival_*.py`. Test M4 in `test_orchestrator.py`. Don't reach across layers.
 - Run full suite before committing: `python -m pytest` from `project-genesis/`.
-  Currently: **442 tests, all passing.**
+  Currently: **601 tests, all passing.**
 
 ---
 

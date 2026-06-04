@@ -105,6 +105,10 @@ class Orchestrator:
         self.ethics = EthicsLens(self)
         self._session_manager = SessionManager(_conn)
 
+        # Self-authored consolidation — Genesis's reflection ("sleep") pass.
+        from consolidation import ConsolidationEngine
+        self.consolidation = ConsolidationEngine(self)
+
         # Memory ceiling must accommodate Genesis's offline library. The NLTK
         # corpus (Brown + Gutenberg, ~135k sentences) resides in RAM for fast
         # search and alone pushes RSS to ~550 MB. With the old 512 MB default
@@ -474,6 +478,18 @@ class Orchestrator:
             from ingestion.feeder import KnowledgeFeeder
             self._feeder = KnowledgeFeeder(self)
         return self._feeder.run(n_topics=n_topics, verbose=verbose)
+
+    def reflect(self, cycle: int = 0, top_k: int = 8) -> dict:
+        """
+        Run a consolidation pass — Genesis reflects on what it has processed
+        and decides for itself what mattered. Returns the reflection report.
+        """
+        return self.consolidation.consolidate(cycle=cycle or self.cycle_count,
+                                               top_k=top_k)
+
+    def latest_reflection(self) -> dict | None:
+        """The most recent reflection — what Genesis has been thinking about."""
+        return self.consolidation.latest()
 
     def curiosity_report(self) -> list[dict]:
         """Show what Genesis is most curious about without fetching anything."""

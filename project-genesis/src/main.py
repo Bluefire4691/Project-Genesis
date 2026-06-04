@@ -227,7 +227,7 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
 
 _LIVE_COMMANDS = {
     "quit", "exit", "q", "summary", "books", "curiosity",
-    "inferences", "status", "save", "learn",
+    "inferences", "status", "save", "learn", "reflect", "thoughts",
 }
 
 _THOUGHT_LOG_PATH = os.path.join("data", "genesis_thoughts.log")
@@ -335,7 +335,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     print()
     print("  This window is for talking. Just type — Genesis keeps thinking")
     print("  in the background and answers when you speak.")
-    print("  Commands: quit  summary  books  curiosity  status  save  learn")
+    print("  Commands: quit  summary  curiosity  thoughts  reflect  status  save")
     print()
 
     # Use a clean prefix in live mode — overrides the default "[Genesis] "
@@ -347,11 +347,13 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
 
     cycles        = 0
     last_fetch    = 0
+    last_reflect  = 0
     last_save     = time.time()
     last_pulse    = time.time()
     current_topic = "—"   # tracks what Genesis is currently reading about
     _AUTOSAVE_INTERVAL = 120.0  # auto-save every 2 minutes
     _PULSE_INTERVAL    = 90.0   # quiet foreground "still here" pulse
+    _REFLECT_EVERY     = 400    # Genesis "sleeps" and consolidates every N cycles
 
     try:
         while not stop_evt.is_set():
@@ -428,9 +430,24 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                         brain.save_session()
                         last_save = time.time()
                         last_fetch = cycles
+                    elif cmd == "reflect":
+                        print("\n  Genesis is reflecting...", flush=True)
+                        rep = brain.reflect(cycle=cycles)
+                        if rep.get("summary"):
+                            print(f"\n  Genesis: {rep['summary']}")
+                        think.write(f"REFLECTION: {rep.get('summary','')}")
+                        last_reflect = cycles
+                    elif cmd == "thoughts":
+                        latest = brain.latest_reflection()
+                        if latest:
+                            print(f"\n  Genesis: {latest['summary']}")
+                        else:
+                            print("\n  Genesis hasn't reflected yet — give it "
+                                  "some time, or type 'reflect'.")
                     else:
                         print(f"\n  Unknown command '{cmd}'. "
-                              "Try: quit  summary  books  curiosity  inferences  status  save  learn")
+                              "Try: quit  summary  books  curiosity  inferences  "
+                              "status  save  learn  reflect  thoughts")
                     print(flush=True)
 
                 else:
@@ -486,6 +503,18 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                     think.write(f"[fetch error: {e}]")
                 last_fetch = cycles
 
+            # ── 3b. Periodic reflection — Genesis "sleeps" and consolidates ─
+            if cycles - last_reflect >= _REFLECT_EVERY:
+                try:
+                    rep = brain.reflect(cycle=cycles)
+                    if rep.get("summary"):
+                        think.write("")
+                        think.write(f"REFLECTION: {rep['summary']}")
+                        think.write("")
+                except Exception as e:
+                    think.write(f"[reflection error: {e}]")
+                last_reflect = cycles
+
             # ── 4. Periodic auto-save ───────────────────────────────
             now = time.time()
             if now - last_save >= _AUTOSAVE_INTERVAL:
@@ -509,6 +538,15 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
         pass
     finally:
         stop_evt.set()
+        # A final reflection so the session's last thinking is consolidated
+        # and remembered for next time.
+        try:
+            rep = brain.reflect(cycle=cycles)
+            if rep.get("summary"):
+                print(f"\n  Genesis: {rep['summary']}")
+                think.write(f"REFLECTION (on resting): {rep['summary']}")
+        except Exception:
+            pass
         brain.save_session()
         think.write("Session saved. Genesis resting.")
         think.close()
@@ -753,6 +791,8 @@ def run_interactive(brain):
     print("    learn:<N>            — fetch N topics (default 3)")
     print("    books                — show what Genesis is currently reading and how far")
     print("    chat                 — talk to Genesis; it responds from its own knowledge")
+    print("    reflect              — Genesis consolidates and tells you what mattered")
+    print("    thoughts             — what Genesis has been thinking about lately")
     print("    summary              — what Genesis knows and has derived (readable)")
     print("    status               — full system status (JSON)")
     print("    relations:all        — show every stored relation")
@@ -782,7 +822,19 @@ def run_interactive(brain):
             continue
         if user_input.lower() in ("quit", "exit", "q"):
             break
-        if user_input.lower() == "express":
+        if user_input.lower() == "reflect":
+            rep = brain.reflect()
+            print(f"  {rep.get('summary', '(nothing yet)')}")
+            if rep.get("salient"):
+                top = ", ".join(s["concept"] for s in rep["salient"][:8])
+                print(f"  Salient: {top}")
+        elif user_input.lower() in ("thoughts", "reflection"):
+            latest = brain.latest_reflection()
+            if latest:
+                print(f"  {latest['summary']}")
+            else:
+                print("  Genesis hasn't reflected yet. Try 'reflect'.")
+        elif user_input.lower() == "express":
             _show_expression(brain)
         elif user_input.lower() == "voice":
             stmt = brain.voice.express(force=True)
