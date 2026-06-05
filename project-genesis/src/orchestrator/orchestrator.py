@@ -399,8 +399,8 @@ class Orchestrator:
             rel_row = self._relations_conn_concepts()
             if context_words & rel_row:
                 return False
-        except Exception:
-            pass
+        except Exception as exc:
+            self.survival.resilience.error_log.log("is_novel.relations_check", exc)
 
         return True
 
@@ -568,6 +568,71 @@ class Orchestrator:
             self._feeder = KnowledgeFeeder(self)
         return self._feeder.run(n_topics=n_topics, verbose=verbose)
 
+    def learn_about(self, concept: str, verbose: bool = False) -> dict:
+        """
+        On-demand learning about a single named concept.
+
+        Unlike fetch_knowledge() — which follows Genesis's own curiosity
+        frontier — this learns about a concept a human just asked about, right
+        now, synchronously. It pulls the WordNet definition (always offline),
+        a relevant Gutenberg passage (cache-first), and any NLTK corpus text,
+        processes all of it through the normal pipeline, and reports how much
+        the relation graph grew.
+
+        This is what makes conversation generative: ask Genesis about lakes and
+        it goes and reads about lakes, then answers from what it just learned —
+        the same mechanism a curious person uses, not a parametric lookup.
+
+        Returns:
+            {concept, relations_before, relations_after, relations_added,
+             chunks_processed, success}
+        """
+        if not hasattr(self, "_feeder") or self._feeder is None:
+            from ingestion.feeder import KnowledgeFeeder
+            self._feeder = KnowledgeFeeder(self)
+
+        concept = (concept or "").strip().lower()
+
+        # Try the word as given, then a singular form if it looks plural.
+        # WordNet keys on lemmas — "lakes" returns nothing but "lake" does.
+        variants = [concept]
+        if concept.endswith("ies") and len(concept) > 4:
+            variants.append(concept[:-3] + "y")   # "berries" -> "berry"
+        elif concept.endswith("es") and len(concept) > 3:
+            variants.append(concept[:-2])          # "volcanoes" -> "volcano"
+        if concept.endswith("s") and not concept.endswith("ss") and len(concept) > 3:
+            variants.append(concept[:-1])          # "lakes" -> "lake"
+
+        before = self.relations.stats().get("total_relations", 0)
+        result = {"success": False, "chunks_processed": 0}
+        for variant in variants:
+            try:
+                result = self._feeder._fetch_and_process(variant, verbose=verbose)
+            except Exception as exc:
+                self.survival.resilience.error_log.log(f"learn_about._fetch:{variant}", exc)
+                result = {"success": False, "chunks_processed": 0}
+            if self.relations.stats().get("total_relations", 0) > before:
+                concept = variant
+                break
+        after = self.relations.stats().get("total_relations", 0)
+
+        # New material is worth a fresh inference pass so the answer can draw on
+        # any chains the new edges complete.
+        if after > before:
+            try:
+                self.inference.run(session_id=self.session_id)
+            except Exception as exc:
+                self.survival.resilience.error_log.log("learn_about.inference", exc)
+
+        return {
+            "concept": concept,
+            "relations_before": before,
+            "relations_after": after,
+            "relations_added": after - before,
+            "chunks_processed": result.get("chunks_processed", 0),
+            "success": result.get("success", False),
+        }
+
     def reflect(self, cycle: int = 0, top_k: int = 8) -> dict:
         """
         Run a consolidation pass — Genesis reflects on what it has processed
@@ -589,8 +654,8 @@ class Orchestrator:
                     f"(confidence={cal.confidence:.2f}, "
                     f"data={cal.data_points} entries)"
                 )
-        except Exception:
-            pass  # calibration failure never affects the reflection result
+        except Exception as exc:
+            self.survival.resilience.error_log.log("reflect.calibration", exc)
 
         # M22: scan for structural analogs after each reflection pass.
         # Reflection is when the relation graph is richest — best moment
@@ -599,8 +664,8 @@ class Orchestrator:
             new_analogs = self.pattern_transfer.scan()
             if new_analogs > 0 and self.verbose:
                 self._log(f"  🔁 {new_analogs} structural analog pair(s) detected")
-        except Exception:
-            pass
+        except Exception as exc:
+            self.survival.resilience.error_log.log("reflect.pattern_transfer", exc)
 
         return result
 
@@ -672,8 +737,8 @@ class Orchestrator:
             if attention:
                 sources = {t: 1.0 for t in attention[:8]}
                 activation = self.spreading_activation.compute(sources)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.survival.resilience.error_log.log("query.spreading_activation", exc)
 
         results = self.memory.search(question, top_k=5, activation_boost=activation or None)
 
@@ -806,8 +871,8 @@ class Orchestrator:
             # Persist after every update
             if resolved or self._curiosity_directives:
                 self._save_directives()
-        except Exception:
-            pass  # directive failure is never a cycle failure
+        except Exception as exc:
+            self.survival.resilience.error_log.log("directives.update", exc)
 
     def _load_directives(self) -> dict[str, float]:
         """Load persisted curiosity directives from consolidation_state."""
@@ -820,8 +885,8 @@ class Orchestrator:
                 data = _json.loads(str(row[0])) if row[0] else {}
                 if isinstance(data, dict):
                     return data
-        except Exception:
-            pass
+        except Exception as exc:
+            self.survival.resilience.error_log.log("directives._load", exc)
         return {}
 
     def _save_directives(self) -> None:
@@ -833,8 +898,8 @@ class Orchestrator:
                 ("curiosity_directives", _json.dumps(self._curiosity_directives)),
             )
             self.consolidation._conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            self.survival.resilience.error_log.log("directives._save", exc)
 
     def full_status(self) -> dict:
         status = {

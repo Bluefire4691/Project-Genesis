@@ -73,6 +73,13 @@ class KnowledgeFeeder:
     _MAX_TOPICS_PER_RUN = 10
     _MAX_STRIKES = 2          # unproductive fetches before a topic is set aside
 
+    def _log_error(self, label: str, exc: Exception) -> None:
+        """Route a caught exception to the survival error log (errors are data)."""
+        try:
+            self._brain.survival.resilience.error_log.log(label, exc)
+        except Exception:
+            pass  # error logging itself must never crash
+
     def run(self, n_topics: int = 5, verbose: bool = True) -> dict:
         """
         Run one curiosity-driven knowledge acquisition cycle.
@@ -188,8 +195,8 @@ class KnowledgeFeeder:
                     self._unproductive[concept] = strikes
                 if failed:
                     self._failed_topics.add(concept)
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_error("feeder._load_state", exc)
 
     def _persist_topic(self, concept: str) -> None:
         """Write one topic's current strike/failed state to the DB."""
@@ -210,8 +217,8 @@ class KnowledgeFeeder:
                 time.time(),
             ))
             self._conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_error(f"feeder._persist_topic:{concept}", exc)
 
     def curiosity_report(self) -> list[dict]:
         """Show what Genesis is most curious about without fetching."""
@@ -294,8 +301,8 @@ class KnowledgeFeeder:
             try:
                 self._brain.process_input("text", chunk)
                 processed += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_error(f"feeder.process_chunk:{topic}", exc)
 
         elapsed = round(time.monotonic() - t_start, 2)
         return {

@@ -76,34 +76,55 @@ def _best_synset(wn, word: str):
     """
     Return the most appropriate synset for the word.
 
-    Uses _PREFER_SYNSET override first, then prefers synsets with a
-    scientific/natural lexname, then falls back to synsets()[0].
+    Sense selection by most-frequent-sense disambiguation: WordNet orders
+    synsets by corpus frequency and annotates each lemma with a SemCor count.
+    The everyday meaning of a word is almost always its most frequent sense —
+    "lake" means a body of water, not a red pigment; "mountain" means a
+    landform, not "a large quantity". This is the standard WSD baseline and it
+    scales to any word, unlike hand-curated overrides.
+
+    Strategy:
+      1. Explicit _PREFER_SYNSET override (a few stubborn edge cases).
+      2. Among noun synsets, the one whose matching lemma has the highest
+         SemCor count (ties broken by WordNet's own frequency ordering).
+      3. Fall back to all-POS synsets if the word has no noun sense.
+
+    The earlier lexname-preference logic was removed: preferring "scientific"
+    lexnames like noun.substance/noun.quantity actively promoted rare senses
+    (the pigment sense of "lake", the "large amount" sense of "mountain").
     """
     query = word.lower().replace(" ", "_")
-    synsets = wn.synsets(query)
+    word_lower = word.lower()
+
+    # Topics people ask about are overwhelmingly nouns — prefer noun senses,
+    # falling back to all parts of speech only when there is no noun sense.
+    noun_synsets = wn.synsets(query, pos=wn.NOUN)
+    synsets = noun_synsets or wn.synsets(query)
     if not synsets:
         return None
 
-    word_lower = word.lower()
-
-    # Explicit index override for known problem words
+    # Explicit index override for the handful of words MFS still gets wrong.
     if word_lower in _PREFER_SYNSET:
         idx = _PREFER_SYNSET[word_lower]
         if idx < len(synsets):
             return synsets[idx]
         return synsets[0]
 
-    # Prefer a synset with a scientific/natural lexname
-    for s in synsets:
-        if s.lexname() in _PREFERRED_LEXNAMES:
-            return s
+    def _lemma_count(s) -> int:
+        best = 0
+        for lemma in s.lemmas():
+            if lemma.name().lower() == query:
+                best = max(best, lemma.count())
+        return best
 
-    # Avoid person/state/act senses if something better exists
-    non_social = [s for s in synsets if s.lexname() not in _DEPRIORITISE_LEXNAMES]
-    if non_social:
-        return non_social[0]
-
-    return synsets[0]
+    # Most-frequent-sense: highest SemCor count wins. WordNet lists synsets in
+    # rough frequency order, so the first synset is the tiebreak for count==0.
+    ranked = sorted(
+        enumerate(synsets),
+        key=lambda pair: (_lemma_count(pair[1]), -pair[0]),
+        reverse=True,
+    )
+    return ranked[0][1]
 
 
 def _format_definition(word: str, synset) -> str:

@@ -315,6 +315,19 @@ class GenesisVoice:
             reply = self._say_plans()
             return self._log_and_return(reply, set())
 
+        # ── Intent: "tell me about X" / "what is X" / "learn about X" ────
+        # When a human asks about a topic, Genesis goes and learns about it
+        # right now — reads the WordNet definition and any relevant book
+        # passage — then answers from what it just read. This is what makes
+        # conversation generative instead of a lookup of what's already known.
+        asked, explicit_learn = self._query_topic(text)
+        if asked:
+            reply, learned_concepts = self._learn_and_explain(
+                asked, force_learn=explicit_learn
+            )
+            if reply:
+                return self._log_and_return(reply, set(learned_concepts))
+
         # ── Follow-up: user is continuing from a prior topic ─────────────
         if self._is_followup(text, concepts):
             prior_concepts = self._recent_concepts(roles={"genesis"}, turns=3)
@@ -631,6 +644,157 @@ class GenesisVoice:
                 known.append(word)
         return known[:5]
 
+    # ------------------------------------------------------------------
+    # Conversational on-demand learning
+    # ------------------------------------------------------------------
+
+    # Phrases that mean "go find out about this": question/request frames whose
+    # object is a topic Genesis should learn, not a concept it must already know.
+    _ASK_PATTERNS = [
+        # explicit requests to learn → always go fetch
+        (r"(?:can you |could you |please |go )?(?:learn|read|find out|"
+         r"look\s*up|study|research)\s+(?:about\s+|on\s+)?(.+)", True),
+        # questions about a topic → learn if not already known
+        (r"(?:tell me|tell us)\s+(?:more\s+)?about\s+(.+)", False),
+        (r"what (?:is|are|was|were|do you know about|can you tell me about)\s+(.+)",
+         False),
+        (r"what'?s\s+(?:a\s+|an\s+|the\s+)?(.+)", False),
+        (r"do you know (?:about |anything about |much about )?(.+)", False),
+        (r"(?:explain|describe|define)\s+(.+)", False),
+        (r"(?:have you (?:heard|learned) (?:of|about)|"
+         r"are you familiar with)\s+(.+)", False),
+    ]
+
+    def _query_topic(self, text: str) -> tuple[list[str], bool]:
+        """
+        Detect a 'go learn about X' / 'what is X' question and extract its topic.
+
+        Returns (topic_words, explicit_learn). topic_words is the list of
+        content words naming the topic (empty if the message isn't such a
+        question). explicit_learn is True when the user literally asked Genesis
+        to learn/read/research something — in that case Genesis fetches even if
+        it already knows a little.
+        """
+        try:
+            from ingestion.curiosity import _SKIP_CONCEPTS
+        except ImportError:
+            _SKIP_CONCEPTS = set()
+
+        for pattern, explicit in self._ASK_PATTERNS:
+            m = re.match(r"^\s*" + pattern + r"\s*[?.!]*\s*$", text)
+            if not m:
+                continue
+            tail = m.group(1).strip()
+            # Strip leading articles / fillers
+            tail = re.sub(r"^(a|an|the|some|any|me|us|you)\s+", "", tail)
+            words = re.findall(r"[a-z]+", tail.lower())
+            content = [w for w in words
+                       if len(w) >= 3 and w not in _SKIP_CONCEPTS]
+            if content:
+                return content[:3], explicit
+        return [], False
+
+    def _learn_and_explain(
+        self, topic_words: list[str], force_learn: bool = False
+    ) -> tuple[Optional[str], list[str]]:
+        """
+        Learn about a topic on demand, then answer comprehensively.
+
+        For each topic word Genesis doesn't already understand well (or all of
+        them, if the user explicitly asked it to learn), it calls
+        brain.learn_about() — which reads the WordNet definition and any
+        relevant book passage and processes them — then composes an answer from
+        what it now knows.
+
+        Returns (reply, concepts_covered).
+        """
+        learned: list[str] = []
+        grew = False
+        primary = topic_words[0]
+        for i, word in enumerate(topic_words):
+            stage = self._stage_for_concept(word)
+            effective = word
+            if force_learn or stage < 2:
+                try:
+                    res = self._brain.learn_about(word, verbose=False)
+                    if res.get("relations_added", 0) > 0:
+                        grew = True
+                    # learn_about may have succeeded under a singular variant
+                    # ("lakes" -> "lake"); answer about the form that worked.
+                    effective = res.get("concept", word) or word
+                except Exception:
+                    pass
+            if i == 0:
+                primary = effective
+            learned.append(effective)
+
+        # Compose a comprehensive answer from what Genesis now knows.
+        body = self._compose_comprehensive(primary)
+
+        if body:
+            if grew:
+                opener = f"I read up on {primary} just now. "
+                return opener + body, learned
+            return body, learned
+
+        # Nothing found in any source — say so honestly, don't fabricate.
+        if grew is False:
+            return (
+                f"I went looking for {primary} but couldn't find a source I "
+                f"could read — I don't have anything solid to tell you about it "
+                f"yet.", learned
+            )
+        return None, learned
+
+    def _compose_comprehensive(self, concept: str) -> Optional[str]:
+        """
+        A fuller answer about a concept: the prose Genesis actually read, plus
+        the understanding it has derived from the relation graph.
+
+        Leads with retained sentences (real language Genesis processed), then
+        adds the graph-derived synthesis when it contributes something the prose
+        didn't already say. This is the 'comprehensive response' a person wants
+        when they ask about a topic.
+        """
+        norm = concept.lower().strip()
+        parts: list[str] = []
+
+        # 1. What Genesis actually read about it (grounded prose).
+        prose = self._pull_prose_about(norm, n=3)
+        parts.extend(prose)
+
+        # 2. What Genesis has worked out (graph synthesis), if it adds anything.
+        synth = getattr(self._brain, "synthesis", None)
+        if synth is not None:
+            try:
+                explained = synth.explain(norm)
+            except Exception:
+                explained = ""
+            # Only append if it's a real account, not the "haven't formed an
+            # understanding" stub, and isn't just restating the prose.
+            if (explained
+                    and "not yet formed" not in explained.lower()
+                    and "have not yet" not in explained.lower()):
+                # Avoid duplicating a sentence already present in the prose.
+                already = " ".join(parts).lower()
+                new_clauses = [
+                    c.strip() for c in re.split(r'(?<=[.!?])\s+', explained)
+                    if c.strip() and c.strip().lower() not in already
+                ]
+                if new_clauses:
+                    parts.append(" ".join(new_clauses))
+
+        if not parts:
+            # Fall back to the staged composer (handles stage 0/1 gracefully).
+            return self._compose_about(norm)
+
+        reply = " ".join(parts).strip()
+        # Offer a thread to keep the conversation going.
+        follow = self._curiosity_question(exclude={norm})
+        if follow:
+            reply = f"{reply} {follow}"
+        return reply
+
     def compose(self, trigger: Optional[str] = None) -> Optional[str]:
         """Generate a statement without delivering it."""
         return self._compose_for_trigger(trigger)
@@ -843,7 +1007,7 @@ class GenesisVoice:
         except Exception:
             return []
         seen: set = set()
-        sentences: list[str] = []
+        candidates: list[str] = []
         for _key, mem in results:
             raw = mem.content.split("|")[0].strip() if mem.content else ""
             for s in re.split(r'(?<=[.!?])\s+', raw):
@@ -857,10 +1021,26 @@ class GenesisVoice:
                                      "REQUIRES", "CONTROLS", "ENABLES",
                                      "PREVENTS", "AFFECTS"])):
                     seen.add(s)
-                    sentences.append(s)
-                    if len(sentences) >= n:
-                        return sentences
-        return sentences
+                    candidates.append(s)
+
+        # Rank definition-style sentences first: a reader wants "A river is a
+        # large stream of water" before an evocative passage that merely
+        # mentions a river. Sentences where the concept is the grammatical
+        # subject of a defining verb score highest.
+        def _defn_score(s: str) -> int:
+            low = s.lower()
+            score = 0
+            if re.search(rf"\b(a |an |the )?{re.escape(concept)}s?\b\s+"
+                         rf"(is|are|was|were|refers?|means?|denotes?)\b", low):
+                score += 3
+            if low.startswith(concept) or low.startswith(("a " + concept,
+                                                          "an " + concept,
+                                                          "the " + concept)):
+                score += 1
+            return score
+
+        candidates.sort(key=_defn_score, reverse=True)
+        return candidates[:n]
 
     def _compose_about(self, concept: str) -> Optional[str]:
         """

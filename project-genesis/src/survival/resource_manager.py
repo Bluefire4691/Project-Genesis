@@ -115,6 +115,14 @@ class ResourceManager:
         self._energy: float = 1.0
         self._throttle: ThrottleLevel = ThrottleLevel.NONE
 
+        # Smoothing factor for energy (EMA). A single tick's pressure can move
+        # energy by at most this fraction, so a one-off CPU spike — e.g. loading
+        # the WordNet corpus, which costs ~3s of CPU charged to the next tick —
+        # cannot by itself collapse energy to 0 and force EMERGENCY throttle.
+        # Sustained genuine load still drives energy down over several ticks.
+        # See DEF-001 in docs/STATE_OF_PROJECT.md.
+        self._energy_alpha: float = 0.35
+
         # Hysteresis: track candidate level for 2 ticks before committing
         self._candidate_throttle: ThrottleLevel = ThrottleLevel.NONE
         self._candidate_ticks: int = 0
@@ -157,15 +165,21 @@ class ResourceManager:
         self._last_wall = now
 
         try:
-            cpu_delta_ms, rss_kb = self._measure()
+            cpu_delta_ms, rss_kb, cpu_user_s, cpu_sys_s = self._measure()
 
             # Normalize to energy: 1.0 = no pressure, 0.0 = maxed out
             mem_pressure = min(1.0, rss_kb / max(1, self.memory_limit_kb))
             cpu_pressure = min(1.0, cpu_delta_ms / max(1.0, self.cpu_budget_ms))
             raw_energy = max(0.0, 1.0 - max(mem_pressure, cpu_pressure))
 
-            self._energy = raw_energy
-            self._update_throttle(self._energy_to_throttle(raw_energy))
+            # EMA-smooth energy so a single transient spike (e.g. a one-time
+            # corpus load) cannot collapse cognition to EMERGENCY. Sustained
+            # pressure pulls energy down over several ticks as intended.
+            self._energy = (
+                self._energy_alpha * raw_energy
+                + (1.0 - self._energy_alpha) * self._energy
+            )
+            self._update_throttle(self._energy_to_throttle(self._energy))
 
             # Sync the shared ResourceBudget
             self.budget.memory_bytes = rss_kb * 1024
@@ -173,8 +187,8 @@ class ResourceManager:
 
             snap = ResourceSnapshot(
                 timestamp=time.time(),
-                cpu_user_s=usage.ru_utime,
-                cpu_sys_s=usage.ru_stime,
+                cpu_user_s=cpu_user_s,
+                cpu_sys_s=cpu_sys_s,
                 cpu_delta_ms=round(cpu_delta_ms, 3),
                 memory_rss_kb=rss_kb,
                 memory_limit_kb=self.memory_limit_kb,
@@ -226,26 +240,34 @@ class ResourceManager:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _measure(self) -> tuple[float, int]:
+    def _measure(self) -> tuple[float, int, float, float]:
         """
-        Return (cpu_delta_ms, rss_kb) cross-platform.
+        Return (cpu_delta_ms, rss_kb, cpu_user_s, cpu_sys_s) cross-platform.
 
         Unix: uses resource.getrusage() — precise cumulative CPU + RSS.
         Windows: uses time.process_time() for CPU; psutil for RSS if
                  installed, otherwise reports 0 (energy stays high, no pressure).
+
+        cpu_user_s/cpu_sys_s are cumulative totals for telemetry. On platforms
+        without the `resource` module the split is unavailable, so the whole
+        process-CPU total is reported as user time and sys time is 0.
         """
         if _HAS_RESOURCE:
             usage = _resource_mod.getrusage(_resource_mod.RUSAGE_SELF)
-            cpu_total = usage.ru_utime + usage.ru_stime
+            cpu_user_s = usage.ru_utime
+            cpu_sys_s = usage.ru_stime
+            cpu_total = cpu_user_s + cpu_sys_s
             cpu_delta_ms = (cpu_total - self._last_cpu_s) * 1000.0
             self._last_cpu_s = cpu_total
             rss_kb = self._sample_rss_unix(usage)
         else:
             cpu_total = time.process_time()
+            cpu_user_s = cpu_total
+            cpu_sys_s = 0.0
             cpu_delta_ms = (cpu_total - self._last_cpu_s) * 1000.0
             self._last_cpu_s = cpu_total
             rss_kb = self._sample_rss_windows()
-        return cpu_delta_ms, rss_kb
+        return cpu_delta_ms, rss_kb, cpu_user_s, cpu_sys_s
 
     def _sample_rss_unix(self, usage) -> int:
         """Return RSS in KB on Unix. Tries /proc first (Linux), falls back to ru_maxrss."""

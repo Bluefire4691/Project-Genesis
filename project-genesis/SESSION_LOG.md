@@ -1703,3 +1703,81 @@ storage required.
 The memory store's `content` field sometimes includes the extracted relation context
 after a `|` separator ("A neuron contains dendrites. | {keywords...}"). The filter
 ensures only the prose half reaches the voice layer.
+
+---
+
+## Session: Assess → Stabilise → Verify → Realign (DEF-001, DEF-002, DEF-003)
+
+**Date:** 2026-06-05
+**Branch:** claude/extract-genesis-repo-fn5vW
+
+### What was done
+
+Applied the standard **Assess → Stabilise → Verify → Realign** recovery cycle
+for a project that had accrued 24 milestones without a cross-layer integration
+review. The flagship problem: Genesis could not reliably learn what a user asked
+about in conversation.
+
+#### Step 1 — Assess
+Produced `docs/STATE_OF_PROJECT.md` — a deliberately unflattering audit.
+Root-caused the flagship bug (DEF-001) and catalogued three others.
+
+#### Step 2 — Stabilise
+
+**DEF-001 (CRITICAL) — Fixed:** Loading the WordNet corpus burns ~2,920 ms CPU
+which `ResourceManager.tick()` charged to the next cognitive cycle as
+`cpu_pressure = 1.0 → energy = 0.0 → EMERGENCY → can("memory_store") = False`.
+Result: every subsequent `learn_about()` call processed text but stored nothing.
+Fix: EMA energy smoothing (`alpha=0.35`). A single transient spike cannot by
+itself commit the system to EMERGENCY; sustained genuine load still throttles.
+
+**DEF-003 (MEDIUM) — Fixed:** `ResourceManager.tick()` referenced `usage.ru_utime`
+where `usage` was a local inside `_measure()` — NameError on every tick, caught
+and silenced, returning stale telemetry. Fix: `_measure()` now returns
+`(cpu_delta_ms, rss_kb, cpu_user_s, cpu_sys_s)` and `tick()` uses the return values.
+
+**DEF-002 (HIGH) — Fixed:** Blanket `except: pass` across the ingestion path
+(`KnowledgeFeeder._fetch_and_process`, `learn_about`, calibration, spreading
+activation, directives, pattern transfer) silently dropped all exceptions.
+Fix: all swallowed exceptions now route to `survival.resilience.error_log.log()`.
+`feeder._log_error()` helper added. Graceful degradation preserved; silence ended.
+
+**Conversational on-demand learning (M24):** Added `brain.learn_about(concept)`
+— synchronous on-demand fetch from WordNet + Gutenberg + NLTK corpus — wired into
+`chat_respond()` via `_query_topic()` detection. Genesis now fetches and learns
+mid-conversation when asked about a topic it doesn't yet know.
+
+**WordNet sense selection fix:** Replaced lexname-preference heuristics (which
+promoted the pigment sense of "lake" and the "large quantity" sense of "mountain")
+with most-frequent-sense disambiguation using SemCor lemma counts. "lake" →
+body of water, "mountain" → landform.
+
+#### Step 3 — Verify
+
+Added behaviour-first acceptance tests (not unit tests pinning implementation):
+- `tests/test_resource_throttle_regression.py` — 3 tests; real pipeline with
+  no mocks; confirms a CPU spike cannot force EMERGENCY and a full learning session
+  keeps growing the graph
+- `tests/test_conversational_learning.py` — 15 tests; topic extraction, on-demand
+  learning, plural forms, sense selection, comprehensive answers
+
+906 tests, all passing.
+
+#### Step 4 — Realign
+
+Added Section 8 to `docs/STATE_OF_PROJECT.md`:
+- Explicit claims-vs-reality ledger (implementation vs. CLAUDE.md aspiration)
+- Falsifiable success criteria (7 criteria, all currently ✅)
+- Claims not yet falsifiably true (deliberative layer, noticed_log)
+- Explicit non-goals (benchmarks, Turing test, metaphysical consciousness)
+
+### Files changed
+- `src/survival/resource_manager.py` — EMA energy (DEF-001), _measure() return tuple (DEF-003)
+- `src/ingestion/feeder.py` — `_log_error()` helper, all `except: pass` → `except ... as exc: _log_error(...)` (DEF-002)
+- `src/orchestrator/orchestrator.py` — `learn_about()`, error logging for DEF-002 (cognition path)
+- `src/ingestion/wordnet_dict.py` — MFS sense selection replacing lexname heuristics
+- `src/output/voice.py` — M24 conversational learning wiring, progressive expression M23
+- `docs/STATE_OF_PROJECT.md` — full audit + remediation + realign (Step 4 / Section 8)
+- `tests/test_resource_throttle_regression.py` — new (3 tests)
+- `tests/test_conversational_learning.py` — new (15 tests)
+- `tests/test_language_acquisition.py` — new (13 tests, from M23 session)
