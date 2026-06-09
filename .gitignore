@@ -1,0 +1,4 @@
+# Runtime-generated data (book cache, corpus index, DB WAL files, logs)
+data/
+*.db-shm
+*.db-wal
