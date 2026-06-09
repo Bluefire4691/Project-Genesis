@@ -36,8 +36,9 @@ echo.
 :: window so the thinking never floods the place where you type.
 if not exist data mkdir data
 if not exist data\genesis_thoughts.log type nul > data\genesis_thoughts.log
-start "Genesis - Live Thoughts" powershell -NoExit -Command "Get-Content -Path 'data\genesis_thoughts.log' -Wait -Tail 40"
+start "Genesis - Live Thoughts" powershell -NoExit -Command "chcp 65001 | Out-Null; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-Content -Path 'data\genesis_thoughts.log' -Wait -Tail 40 -Encoding UTF8"
 
+chcp 65001 > nul
 python src/main.py --open-only --resume --live
 
 echo.
