@@ -16,3 +16,12 @@ nltk>=3.8
 
 # Development / testing:
 pytest>=7.0
+
+# Web browsing — autonomous knowledge acquisition from the open web:
+#   pip install playwright trafilatura ddgs
+#   python -m playwright install chromium   (downloads ~120 MB Chromium)
+# Falls back to requests-only mode if playwright is not installed.
+# Falls back gracefully (no web source) if all three are unavailable.
+playwright>=1.40
+trafilatura>=2.0
+ddgs>=9.0

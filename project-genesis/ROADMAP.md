@@ -209,7 +209,43 @@ The three milestones below are derived from the claims-vs-reality ledger in
 `docs/STATE_OF_PROJECT.md` Section 8. They address the gap between "Genesis
 makes local decisions in each subsystem" and "Genesis can be said to decide."
 
-### M25: Self-Model — Genesis Knows What It Knows ✅ → 🔲
+### M25: Autonomous Web Browsing ✅
+
+Genesis can now explore the open web the way a curious person does —
+not querying a fixed list of sources, but searching, reading, and
+following interesting links based on what it is currently thinking about.
+
+**What was built:**
+- `src/ingestion/browser.py` — `GenesisBrowser`: polite headless browsing
+  (Playwright when available, requests fallback), robots.txt enforcement,
+  per-domain rate limiting, paywall detection, page history (never re-reads
+  a URL), access request queue for paywalled content
+- `src/ingestion/web_source.py` — `WebSource`: search → fetch → follow links.
+  Query is augmented with working-memory concepts for context. Up to 2
+  high-scoring outgoing links are followed per page for serendipitous discovery.
+- `src/ingestion/feeder.py` — WebSource wired as a source alongside WordNet,
+  Gutenberg, and NLTK corpus. Web runs for every topic in OPEN stage.
+- `src/output/voice.py` — wake greeting surfaces pending access requests:
+  "I ran into paywalled content at nature.com — if you can grant access, I
+  can go deeper there."
+- `requirements.txt` — playwright, trafilatura, ddgs documented as optional
+  but preferred dependencies.
+
+**Serendipitous discovery mechanism:**
+Genesis is reading about wolf predator dynamics. The page has a link to
+"trophic cascade analogs in immune response." Genesis's spreading activation
+has "immune" and "cascade" adjacent to active concepts — score exceeds the
+follow threshold — it follows the link. That was not in any search query.
+That is discovery.
+
+**Individuality enabled by this:**
+Each Genesis instance connects to different sources based on what questions
+it is pursuing. One instance chasing marine biology requests oceanography
+journal access. Another following mechanics questions ends up on materials
+science preprint servers. The sources each instance knows are as individual
+as its knowledge graph.
+
+### M26: Self-Model — Genesis Knows What It Knows 🔲
 
 **The gap (from STATE_OF_PROJECT.md §8.4):** Genesis processes and expresses
 understanding, but cannot introspect on its own knowledge state honestly. If asked

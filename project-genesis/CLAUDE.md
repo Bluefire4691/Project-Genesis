@@ -132,9 +132,10 @@ duplication; the roadmap is the authoritative source of truth for project state.
 | M20–M22 | ✅ | Autonomous cognitive loop, knowledge synthesis, pattern transfer |
 | M23–M24 | ✅ | Progressive language acquisition (Stage 0→3), conversational on-demand learning |
 | Infrastructure | ✅ | Assess→Stabilise→Verify→Realign cycle; DEF-001/002/003 fixed; all except:pass → error_log; 906 tests |
-| M25 | 🔲 | Self-model: Genesis knows what it knows (confidence, coverage, contested beliefs) |
-| M26 | 🔲 | Deliberative integration: auditable decision log across subsystems |
-| M27 | 🔲 | Persistent goal formation: goals beyond session-level directives |
+| M25 | ✅ | Autonomous web browsing: Playwright + requests + trafilatura; robots.txt; rate limiting; paywall detection + user escalation; serendipitous link following driven by spreading activation |
+| M26 | 🔲 | Self-model: Genesis knows what it knows (confidence, coverage, contested beliefs) |
+| M27 | 🔲 | Deliberative integration: auditable decision log across subsystems |
+| M28 | 🔲 | Persistent goal formation: goals beyond session-level directives |
 
 ---
 

@@ -254,6 +254,22 @@ class GenesisVoice:
                 f"I've encountered it but can't fully place it yet."
             )
 
+        # ── Access requests that need user attention ──
+        try:
+            feeder = getattr(self._brain, "_feeder", None)
+            if feeder is not None:
+                pending = feeder.pending_access_requests()
+                if pending:
+                    domains = list({r["domain"] for r in pending})[:3]
+                    domain_list = self._english_list(domains)
+                    parts.append(
+                        f"One more thing — I ran into paywalled content at "
+                        f"{domain_list} while researching. "
+                        f"If you can grant access, I can go deeper there."
+                    )
+        except Exception:
+            pass
+
         return " ".join(parts)
 
     def chat_respond(self, user_text: str) -> str:

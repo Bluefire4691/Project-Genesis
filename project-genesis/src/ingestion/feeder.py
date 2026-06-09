@@ -8,16 +8,21 @@ Coordinates the full self-directed knowledge acquisition loop:
     3. GutenbergFetcher finds a relevant book and reads the next passage
        — Genesis tracks where it left off and continues next session
     4. OfflineCorpusFetcher searches the NLTK corpus when Gutenberg is offline
-    5. Each text chunk is processed through brain.process_input()
-    6. New relations accumulate in the RelationGraph
+    5. WebSource searches the open web and follows interesting links
+    6. Each text chunk is processed through brain.process_input()
+    7. New relations accumulate in the RelationGraph
 
 Sources in priority order:
     WordNet      — word definitions, always available offline
     Gutenberg    — complete public domain books, requires network
     NLTK corpus  — Brown + Gutenberg corpora already on disk, offline fallback
+    Web          — open web via DuckDuckGo + headless browser; richest source
+                   when network is available; enables serendipitous discovery
+                   through link following
 
-Genesis reads books, not encyclopedia stubs. The same book is returned to
-across multiple sessions — understanding builds the way a reader's does.
+Genesis reads books and real web pages, not encyclopedia stubs.
+The same book is returned to across multiple sessions; visited web pages
+are recorded and never re-fetched.
 """
 
 import time
@@ -28,6 +33,8 @@ from ingestion.curiosity import CuriosityEngine
 from ingestion.wordnet_dict import WordNetDictionary
 from ingestion.gutenberg import GutenbergFetcher
 from ingestion.corpus import OfflineCorpusFetcher
+from ingestion.browser import GenesisBrowser
+from ingestion.web_source import WebSource
 
 if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
@@ -69,6 +76,15 @@ class KnowledgeFeeder:
         self._conn = getattr(self._conn, "_conn", None)
         self._init_state_schema()
         self._load_state()
+
+        # Web browsing source — shares the brain's DB connection so page
+        # history and access requests persist alongside all other memories.
+        self._browser = GenesisBrowser(db_conn=self._conn)
+        self._browser._error_log = getattr(
+            getattr(getattr(brain, "survival", None), "resilience", None),
+            "error_log", None,
+        )
+        self._web = WebSource(brain, self._browser)
 
     _MAX_TOPICS_PER_RUN = 10
     _MAX_STRIKES = 2          # unproductive fetches before a topic is set aside
@@ -232,12 +248,26 @@ class KnowledgeFeeder:
         """The local downloaded-book reference library."""
         return self._gutenberg.library()
 
+    def pending_access_requests(self) -> list[dict]:
+        """Paywall encounters Genesis could not get past — surface to user."""
+        return self._browser.pending_access_requests()
+
+    def resolve_access_request(self, request_id: int) -> None:
+        """Mark an access request resolved after user grants access."""
+        self._browser.resolve_access_request(request_id)
+
+    def web_available(self) -> bool:
+        """True if web browsing is available in this environment."""
+        return self._web.available
+
     def stats(self) -> dict:
         return {
             "total_topics_fetched":   self._total_topics_fetched,
             "total_chunks_processed": self._total_chunks_processed,
             "gutenberg_online":       self._gutenberg.available,
             "corpus_available":       self._corpus.available,
+            "web_available":          self._web.available,
+            "pending_access_requests": len(self.pending_access_requests()),
         }
 
     # ------------------------------------------------------------------
@@ -280,6 +310,20 @@ class KnowledgeFeeder:
                                sentences_per_chunk=self._sentences_per_chunk)
                 )
                 sources.append("NLTK corpus")
+
+        # --- Web: open web search + serendipitous link following ---
+        # Always attempted in OPEN stage when the browser is available.
+        # Supplements other sources (more depth) or rescues failed lookups
+        # (topic unknown to WordNet/Gutenberg). Discovered pages are recorded
+        # and never re-fetched, so the web expands Genesis's reading
+        # continuously rather than re-reading the same material.
+        if self._web.available:
+            web_results = self._web.fetch_for_topic(topic)
+            for label, text in web_results:
+                all_chunks.extend(
+                    chunk_text(text, sentences_per_chunk=self._sentences_per_chunk)
+                )
+                sources.append(label)
 
         if not all_chunks:
             if verbose:
