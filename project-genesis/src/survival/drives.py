@@ -129,16 +129,18 @@ class DriveSystem:
         empty_streak = self._cycle_since_last_relations
 
         # ── Hunger ──────────────────────────────────────────────────────
-        # Rises with unresolved curiosity gaps; satisfied by new relations
+        # Rises with unresolved curiosity gaps; satisfied by new relations.
+        # Push magnitudes are kept small (≤0.06) so hunger can't saturate
+        # at 1.0 on a fresh brain where directive_count spikes immediately.
         hunger_signal = 0.0
         if stats.directive_count > 5:
-            hunger_signal += 0.15
+            hunger_signal += 0.06
         elif stats.directive_count > 2:
-            hunger_signal += 0.07
+            hunger_signal += 0.03
         if stats.relations_added >= 3:
             hunger_signal -= 0.12   # fed
         elif stats.relations_added == 0:
-            hunger_signal += 0.04   # still hungry
+            hunger_signal += 0.02   # still hungry
         s.hunger = _decay_toward(s.hunger, _BASELINE["hunger"], _DECAY["hunger"], hunger_signal)
 
         # ── Frustration ─────────────────────────────────────────────────

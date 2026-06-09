@@ -127,6 +127,19 @@ class KnowledgeFeeder:
             if len(topics) >= n_topics:
                 break
 
+        # M26 drive wire: diversity_boost from drives system.
+        # When Genesis is bored or frustrated, deprioritize top-ranked (familiar)
+        # topics and push into less-explored territory by rotating the list.
+        diversity_boost = 0.0
+        try:
+            if hasattr(self._brain, "drives"):
+                diversity_boost = self._brain.drives.behavioral_hints().get("diversity_boost", 0.0)
+        except Exception:
+            pass
+        if diversity_boost > 0.3 and len(topics) > 2:
+            skip = max(1, int(diversity_boost * 3))
+            topics = topics[skip:] + topics[:skip]
+
         if not topics:
             return {
                 "topics_attempted": [],

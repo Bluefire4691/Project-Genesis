@@ -180,6 +180,10 @@ class Orchestrator:
         self.drives = DriveSystem(_conn)
         self.drives.restore()
 
+        # Tracks the cycle at which reflection was last triggered by drives
+        # so reflect_sooner fires at most once per 20 cycles, not every cycle.
+        self._last_reflect_cycle: int = 0
+
         # Restore previous session state if requested
         if resume:
             restored = self._session_manager.restore(self)
@@ -213,8 +217,8 @@ class Orchestrator:
         if intero is not None:
             try:
                 self._do_process("numeric", intero)
-            except Exception:
-                pass  # interoception failure is not a cycle failure
+            except Exception as exc:
+                self.survival.resilience.error_log.log("interoception", exc)
 
         # Layer 0: resource tick
         survival_stats = self._survival_stats()
@@ -251,11 +255,23 @@ class Orchestrator:
             input_type, data = stimulus_type, stimulus_data
 
         try:
-            return self._do_process(input_type, data)
+            result = self._do_process(input_type, data)
         except Exception as e:
             self.error_count += 1
             self._log(f"⚠ Orchestrator error (non-fatal): {e}")
             return {"status": "degraded", "reason": str(e), "cycle": self.cycle_count}
+
+        # M26 drive hint: if dissonance is strong and we haven't reflected recently,
+        # trigger a consolidation pass now rather than waiting for the next scheduled one.
+        if (self.cycle_count - self._last_reflect_cycle) >= 20:
+            try:
+                if self.drives.behavioral_hints().get("reflect_sooner"):
+                    self.reflect()
+                    self._last_reflect_cycle = self.cycle_count
+            except Exception as exc:
+                self.survival.resilience.error_log.log("drives.reflect_sooner", exc)
+
+        return result
 
     # ------------------------------------------------------------------
     # M4 core: multi-processor dispatch + synthesis
@@ -331,9 +347,26 @@ class Orchestrator:
                     session_id=self.session_id,
                 )
 
-            # Update attention with cross-modal concepts first, then primary terms
+            # M19: spreading activation in ingestion — current attention primes
+            # graph-adjacent concepts so they're included in this cycle's update,
+            # making retrieval associative even for future cycles.
+            activation = {}
+            try:
+                current_attention = self.memory._working._context_terms
+                if current_attention:
+                    sources = {t: 1.0 for t in current_attention[:8]}
+                    activation = self.spreading_activation.compute(sources)
+            except Exception as exc:
+                self.survival.resilience.error_log.log("process.spreading_activation", exc)
+
+            # Update attention: cross-modal > primary terms, augmented with primed neighbors
             attention_terms = synthesis.cross_modal_concepts or synthesis.context_terms
             if attention_terms:
+                if activation:
+                    primed = [c for c, _ in sorted(
+                        activation.items(), key=lambda kv: kv[1], reverse=True
+                    )[:4]]
+                    attention_terms = list(dict.fromkeys(attention_terms + primed))
                 self.memory.update_attention(attention_terms)
         else:
             stored_keys = []
@@ -454,7 +487,7 @@ class Orchestrator:
             words.update(re.findall(r"\b[a-z]{3,}\b", concept))
         return words
 
-    def _store_synthesis(self, synthesis, raw_data: Any, novel: bool = False) -> list[str]:
+    def _store_synthesis(self, synthesis, raw_data: Any, novel: bool = False) -> tuple[list[str], int]:
         """
         Store all processor outputs, linking cross-modal outputs by association.
 
@@ -683,6 +716,15 @@ class Orchestrator:
             new_analogs = self.pattern_transfer.scan()
             if new_analogs > 0 and self.verbose:
                 self._log(f"  🔁 {new_analogs} structural analog pair(s) detected")
+            # Register curiosity directives from analogs: concepts playing the same
+            # structural role as known regulators/mediators but with unexplained edges.
+            analog_curiosity = self.pattern_transfer.curiosity_from_analogs()
+            for concept in analog_curiosity:
+                if (concept not in self._curiosity_directives
+                        and len(self._curiosity_directives) < self._MAX_DIRECTIVES):
+                    self._curiosity_directives[concept] = 0.82
+            if analog_curiosity:
+                self._save_directives()
         except Exception as exc:
             self.survival.resilience.error_log.log("reflect.pattern_transfer", exc)
 
@@ -875,8 +917,17 @@ class Orchestrator:
             for concept in resolved:
                 self._curiosity_directives.pop(concept, None)
 
+            # M26 drive wire: curiosity_boost lowers the registration threshold
+            # when hunger is strong, making Genesis more sensitive to gaps.
+            curiosity_boost = 0.0
+            try:
+                curiosity_boost = self.drives.behavioral_hints().get("curiosity_boost", 0.0)
+            except Exception:
+                pass
+            effective_threshold = max(0.55, self._DIRECTIVE_PRED_ERROR_MIN - curiosity_boost * 0.15)
+
             # Register new directives from high-surprise context terms
-            if (pred_error >= self._DIRECTIVE_PRED_ERROR_MIN
+            if (pred_error >= effective_threshold
                     and len(self._curiosity_directives) < self._MAX_DIRECTIVES):
                 for term in context_terms:
                     concept = term.strip().lower()

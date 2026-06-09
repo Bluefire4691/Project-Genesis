@@ -322,6 +322,25 @@ def _classify_claim(text: str, word_set: set[str]) -> str:
     return "fact"
 
 
+def _is_clean_subject(raw: str) -> bool:
+    """
+    Reject raw subject groups that cross clause boundaries.
+
+    Lazy (.+?) patterns can capture "wolves are apex predators that" when
+    the actual predicate verb appears inside a relative clause. Detect this
+    by checking for verb forms or relative pronouns after the first word —
+    those signal the regex walked past a clause boundary.
+    """
+    words = raw.strip().split()
+    if len(words) > 5:
+        return False
+    _CLAUSE_MARKERS = frozenset({
+        "that", "which", "who", "whom", "where",
+        "is", "are", "was", "were",
+    })
+    return not any(w.lower() in _CLAUSE_MARKERS for w in words[1:])
+
+
 def _extract_relations_regex(sentence: str) -> tuple[list[dict], list[str]]:
     """
     Regex-based relation extractor (fallback when spaCy is unavailable).
@@ -340,6 +359,12 @@ def _extract_relations_regex(sentence: str) -> tuple[list[dict], list[str]]:
     for pattern, rel_type, confidence in _RELATION_PATTERNS:
         m = re.search(pattern, sent_lower)
         if not m:
+            continue
+
+        # Reject before cleaning: if the raw subject group crosses a clause
+        # boundary (contains "are", "that", "which", etc. after word 1), this
+        # is a relative-clause mis-match that produces "wolves are apex" noise.
+        if not _is_clean_subject(m.group(1)):
             continue
 
         subject = _clean_concept(m.group(1))
