@@ -11,8 +11,6 @@ Install to activate:
     python -m spacy download en_core_web_sm
 """
 import re
-from typing import Optional
-
 try:
     import spacy as _spacy_lib
     try:
@@ -233,21 +231,144 @@ def _extract_from_verb(verb_token, inherited_subjects=None) -> list[dict]:
     return relations
 
 
-def extract_relations_spacy(sentence: str) -> list[dict]:
+def _resolve_relcl_subjects(verb_token) -> list:
     """
-    Extract typed relation triples from a sentence using spaCy dependency
-    parsing.  Returns an empty list when spaCy is not installed or its
-    model is not downloaded.
+    For a relative clause verb, find effective subjects.
+    Relative pronouns (which/who/that/whom) resolve to the antecedent noun
+    — the token this relcl edge hangs from.
+    """
+    antecedent = verb_token.head
+    subjects = []
+    for child in verb_token.children:
+        if child.dep_ in ("nsubj", "nsubjpass"):
+            if child.text.lower() in ("which", "who", "that", "whom"):
+                subjects.append(antecedent)
+            else:
+                subjects.append(child)
+    if not subjects and antecedent.pos_ in ("NOUN", "PROPN"):
+        subjects = [antecedent]
+    return subjects
+
+
+def _extract_from_relcl(verb_token) -> list[dict]:
+    """
+    Extract relations from a relative clause verb.
+
+    "wolves, which ARE apex predators"  → IS_A(wolves, apex predators)
+    "deer that wolves HUNT in packs"    → PREDATES(wolves, deer)
+    """
+    antecedent = verb_token.head
+    subjects = _resolve_relcl_subjects(verb_token)
+    if not subjects:
+        return []
+
+    relations: list[dict] = []
+    is_copula = verb_token.lemma_ == "be"
+
+    if is_copula:
+        attrs = [t for t in verb_token.children if t.dep_ in ("attr", "acomp")]
+        for subj_tok in subjects:
+            subj = _concept_for_token(subj_tok)
+            if not subj:
+                continue
+            for attr_tok in attrs:
+                for obj_tok in _conj_tokens(attr_tok):
+                    obj = _concept_for_token(obj_tok)
+                    if obj and subj != obj:
+                        relations.append({
+                            "subject": subj,
+                            "relation": "IS_A",
+                            "object": obj,
+                            "confidence": 0.85,
+                        })
+    else:
+        rel_info = _VERB_MAP.get(verb_token.lemma_)
+        if rel_info is None:
+            return relations
+        rel_type, confidence = rel_info
+
+        direct_objs = []
+        for child in verb_token.children:
+            if child.dep_ in ("dobj", "oprd"):
+                # Relative pronoun as dobj → object is the antecedent noun
+                if child.text.lower() in ("which", "who", "that", "whom"):
+                    direct_objs.append(antecedent)
+                else:
+                    direct_objs.append(child)
+        prep_objs = []
+        for prep in [t for t in verb_token.children if t.dep_ == "prep"]:
+            for pobj in [t for t in prep.children if t.dep_ == "pobj"]:
+                prep_objs.append(pobj)
+        all_objs = direct_objs + prep_objs
+
+        for subj_tok in subjects:
+            subj = _concept_for_token(subj_tok)
+            if not subj:
+                continue
+            for obj_tok in all_objs:
+                for final_tok in _conj_tokens(obj_tok):
+                    obj = _concept_for_token(final_tok)
+                    if obj and subj != obj:
+                        relations.append({
+                            "subject": subj,
+                            "relation": rel_type,
+                            "object": obj,
+                            "confidence": round(confidence * 0.95, 3),
+                        })
+
+    return relations
+
+
+def _extract_appositives(doc) -> list[dict]:
+    """
+    Extract IS_A from appositive constructions.
+
+    "Wolves, apex predators, shape ecosystems" → IS_A(wolves, apex predators)
+    "Canis lupus, the gray wolf, is territorial" → IS_A(canis lupus, gray wolf)
+    """
+    relations = []
+    for token in doc:
+        if token.dep_ == "appos" and token.head.pos_ in ("NOUN", "PROPN"):
+            head_concept = _concept_for_token(token.head)
+            appos_concept = _concept_for_token(token)
+            if head_concept and appos_concept and head_concept != appos_concept:
+                relations.append({
+                    "subject": head_concept,
+                    "relation": "IS_A",
+                    "object": appos_concept,
+                    "confidence": 0.78,
+                })
+    return relations
+
+
+def extract_relations_spacy(text: str) -> list[dict]:
+    """
+    Extract typed relation triples from text (one or more sentences).
+
+    Processes the full chunk in one spaCy pass — sentence boundaries are
+    handled internally, which improves parsing accuracy compared to feeding
+    one sentence at a time.  Returns empty list when spaCy is unavailable.
+
+    Covers three construction types:
+      ROOT verbs     — main predicate of each sentence
+      relcl verbs    — relative clauses ("wolves, which ARE social...")
+      appositives    — noun phrases in apposition ("wolves, apex predators,...")
     """
     if not SPACY_AVAILABLE or _nlp is None:
         return []
 
-    doc = _nlp(sentence)
+    doc = _nlp(text)
     relations: list[dict] = []
 
     for token in doc:
-        if token.dep_ == "ROOT" and token.pos_ in ("VERB", "AUX"):
+        if token.pos_ not in ("VERB", "AUX"):
+            continue
+        if token.dep_ == "ROOT":
             relations.extend(_extract_from_verb(token))
+        elif token.dep_ == "relcl":
+            relations.extend(_extract_from_relcl(token))
+
+    relations.extend(_extract_appositives(doc))
 
     # Deduplicate while preserving first-seen order
     seen: set[tuple] = set()

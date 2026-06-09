@@ -228,3 +228,81 @@ class TestSpacyCleanConcepts:
             key = (r["subject"], r["relation"], r["object"])
             assert key not in seen, f"Duplicate triple: {key}"
             seen.add(key)
+
+
+@pytestmark_spacy
+class TestRelativeClauses:
+    def test_relcl_is_a(self):
+        """'Wolves, which are apex predators, hunt deer' → IS_A(wolves, apex predators)."""
+        rels = extract_relations_spacy("Wolves, which are apex predators, hunt deer.")
+        is_a = [r for r in rels if r["relation"] == "IS_A"]
+        assert is_a, f"No IS_A extracted from relative clause: {rels}"
+        subjects = {r["subject"] for r in is_a}
+        assert any("wolf" in s or s == "wolves" for s in subjects), (
+            f"Expected wolves as IS_A subject: {subjects}"
+        )
+
+    def test_relcl_predates(self):
+        """'Deer that wolves hunt migrate seasonally' → PREDATES(wolves, deer)."""
+        rels = extract_relations_spacy("Deer that wolves hunt migrate seasonally.")
+        predates = [r for r in rels if r["relation"] == "PREDATES"]
+        assert predates, f"No PREDATES from object-position relative clause: {rels}"
+
+    def test_relcl_and_root_both_extracted(self):
+        """A sentence with relcl + root verb should yield relations from both."""
+        rels = extract_relations_spacy(
+            "Wolves, which are social animals, hunt deer."
+        )
+        rel_types = {r["relation"] for r in rels}
+        assert len(rels) >= 2, (
+            f"Expected ≥2 relations (IS_A from relcl + PREDATES from root): {rels}"
+        )
+        assert "IS_A" in rel_types, f"IS_A missing: {rel_types}"
+        assert "PREDATES" in rel_types, f"PREDATES missing: {rel_types}"
+
+
+@pytestmark_spacy
+class TestAppositives:
+    def test_appositive_is_a(self):
+        """'Wolves, apex predators, shape ecosystems' → IS_A(wolves, apex predators)."""
+        rels = extract_relations_spacy("Wolves, apex predators, shape ecosystems.")
+        is_a = [r for r in rels if r["relation"] == "IS_A"]
+        assert is_a, f"No IS_A from appositive: {rels}"
+        objects = {r["object"] for r in is_a}
+        assert any("predator" in o for o in objects), (
+            f"Expected 'apex predators' as IS_A object: {objects}"
+        )
+
+    def test_appositive_both_ways(self):
+        """Appositive IS_A has head as subject, appositive phrase as object."""
+        rels = extract_relations_spacy("The wolf, a social mammal, lives in packs.")
+        is_a = [r for r in rels if r["relation"] == "IS_A"]
+        assert is_a, f"No IS_A from appositive in complex sentence: {rels}"
+
+
+@pytestmark_spacy
+class TestFullChunkExtraction:
+    def test_multi_sentence_chunk(self):
+        """Full paragraph chunk yields more relations than a single sentence."""
+        single = extract_relations_spacy("Wolves hunt deer.")
+        chunk = extract_relations_spacy(
+            "Wolves are apex predators. "
+            "They hunt deer and elk. "
+            "Wolves, which live in packs, regulate prey populations."
+        )
+        assert len(chunk) >= len(single), (
+            f"Multi-sentence chunk should yield at least as many relations as one sentence. "
+            f"Single: {single}, Chunk: {chunk}"
+        )
+
+    def test_density_from_rich_paragraph(self):
+        """A Wikipedia-style paragraph should yield several relations."""
+        para = (
+            "Wolves are large canine predators native to Eurasia and North America. "
+            "They hunt deer, elk, and moose in cooperative packs. "
+            "Wolves, apex predators, regulate prey populations and enable trophic cascades."
+        )
+        rels = extract_relations_spacy(para)
+        assert len(rels) >= 4, (
+            f"Rich paragraph should yield ≥4 relations, got {len(rels)}: {rels}"
+        )

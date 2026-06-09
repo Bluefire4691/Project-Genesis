@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from processors.text import (
     TextProcessor,
     _split_sentences, _extract_entities, _classify_claim,
-    _extract_relations, _extract_without, _clean_concept, _build_context,
+    _extract_relations_regex as _extract_relations, _extract_without, _clean_concept, _build_context,
 )
 
 P = TextProcessor()

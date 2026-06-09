@@ -158,12 +158,21 @@ class TextProcessor(BaseProcessor):
         relations: list[dict] = []
         causal_markers: list[str] = []
 
-        for sentence in sentences:
-            rels, markers = _extract_relations(sentence)
-            relations.extend(rels)
-            causal_markers.extend(markers)
+        from processors.spacy_extractor import (
+            SPACY_AVAILABLE, extract_relations_spacy, markers_for_relations,
+        )
+        if SPACY_AVAILABLE:
+            # One spaCy pass over the full chunk: covers ROOT verbs, relative
+            # clauses, and appositives — far more relations than per-sentence regex.
+            relations = extract_relations_spacy(text)
+            causal_markers = markers_for_relations(relations)
+        else:
+            for sentence in sentences:
+                rels, markers = _extract_relations_regex(sentence)
+                relations.extend(rels)
+                causal_markers.extend(markers)
 
-        # Also detect "without X" constructions separately
+        # "without X" constructions supplement either path
         without_rels = _extract_without(text)
         relations.extend(without_rels)
         if without_rels:
@@ -311,29 +320,6 @@ def _classify_claim(text: str, word_set: set[str]) -> str:
         return "observation"
 
     return "fact"
-
-
-def _extract_relations(sentence: str) -> tuple[list[dict], list[str]]:
-    """
-    Extract typed relation triples from a single sentence.
-
-    Tries the spaCy dependency-parse extractor first when available.
-    Falls back to regex matching when spaCy is not installed.
-
-    Returns: (list of relation dicts, list of marker strings found)
-    Each relation dict: {subject, relation, object, confidence}
-    """
-    from processors.spacy_extractor import (  # local import — keeps startup fast
-        SPACY_AVAILABLE, extract_relations_spacy, markers_for_relations,
-    )
-    if SPACY_AVAILABLE:
-        rels = extract_relations_spacy(sentence)
-        if rels:
-            return rels, markers_for_relations(rels)
-        # spaCy parsed but found nothing structural — still fall through to
-        # regex so simple patterns like "X is a Y" are not silently dropped.
-
-    return _extract_relations_regex(sentence)
 
 
 def _extract_relations_regex(sentence: str) -> tuple[list[dict], list[str]]:
