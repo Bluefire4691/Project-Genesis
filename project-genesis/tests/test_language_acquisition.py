@@ -318,7 +318,7 @@ class TestThoughtsExpression:
             assert reply.strip(), "Thoughts reply must be non-empty"
             assert _is_clean(reply), f"Raw tokens in thoughts: {reply!r}"
             # Should mention something Genesis was actually thinking about
-            assert any(c in reply.lower() for c in ["wolf", "thinking", "building"]), (
+            assert any(c in reply.lower() for c in ["wolf", "thinking", "building", "understanding"]), (
                 f"Thoughts reply should mention salient concepts: {reply!r}"
             )
         finally:

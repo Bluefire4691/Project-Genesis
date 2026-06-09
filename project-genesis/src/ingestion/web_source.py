@@ -60,6 +60,10 @@ class WebSource:
     def available(self) -> bool:
         return self._browser.available
 
+    @property
+    def search_available(self) -> bool:
+        return self._browser.search_available
+
     def fetch_for_topic(self, topic: str) -> list[tuple[str, str]]:
         """
         Search for topic, fetch best result, follow interesting links.

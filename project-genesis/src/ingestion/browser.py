@@ -226,6 +226,20 @@ class GenesisBrowser:
         """True if at least one fetch backend is usable."""
         return _has_requests() or _has_playwright()
 
+    @property
+    def search_available(self) -> bool:
+        """True if a DuckDuckGo search library is importable."""
+        for pkg in ("ddgs", "duckduckgo_search"):
+            try:
+                if pkg == "ddgs":
+                    import ddgs  # noqa: F401
+                else:
+                    import duckduckgo_search  # noqa: F401
+                return True
+            except ImportError:
+                continue
+        return False
+
     # ------------------------------------------------------------------
     # Core fetch
     # ------------------------------------------------------------------

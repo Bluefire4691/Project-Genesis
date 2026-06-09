@@ -106,6 +106,15 @@ class GenesisVoice:
         self._expressions_total: int = 0
         self._last_statement: str = ""
 
+        # Suppress spontaneous channel output while we're inside chat_respond()
+        # so process_input()'s _maybe_express() doesn't print a second unsolicited
+        # message on top of the response we're about to return.
+        self._suppress_channel: bool = False
+        # After the user speaks, stay quiet for this many seconds so the
+        # conversation has breathing room between turns.
+        self._last_user_message_at: float = 0.0
+        _CONVO_QUIET_S: float = 15.0
+
         # Within-session conversation log.
         # Each entry: {role: "user"|"genesis", text: str, concepts: set[str]}
         # Kept short (last N turns) — this is session working memory, not persistence.
@@ -129,6 +138,9 @@ class GenesisVoice:
         if not force and (now - self._last_expressed_at) < self._min_interval:
             return None
         if not force and self._rng.random() > self._expression_rate:
+            return None
+        # Quiet window: don't interject for 15 s after the user said something
+        if not force and (now - self._last_user_message_at) < 15.0:
             return None
 
         statement = self._compose_for_trigger(trigger)
@@ -293,8 +305,19 @@ class GenesisVoice:
         reflections) — no mangled memory keys, no raw relation-type tokens.
         Within-session conversational memory ensures Genesis tracks the thread.
         """
-        # Always learn from what was said.
-        result = self._brain.process_input("text", user_text)
+        # Track when the user spoke — starts the quiet window so spontaneous
+        # expressions don't print on top of conversation turns.
+        self._last_user_message_at = time.time()
+
+        # Learn from what was said, but block channel delivery during process_input.
+        # _maybe_express() fires inside there and would print a second unsolicited
+        # message; we return the response ourselves below, so suppress the channel.
+        self._suppress_channel = True
+        try:
+            result = self._brain.process_input("text", user_text)
+        finally:
+            self._suppress_channel = False
+
         novel    = result.get("novel", False)
         wm_delta = result.get("wm_delta", 0)
 
@@ -304,11 +327,60 @@ class GenesisVoice:
         # Log the user turn before routing
         self._log_turn("user", user_text, set(concepts))
 
+        # ── Intent: brief acknowledgements / pushback ─────────────────────
+        # "ok", "i didn't ask", "stop" etc — acknowledge without repeating.
+        if re.match(
+            r"^\s*(ok[a-y]*|okay|cool|got\s+it|thanks?|noted|alright|fine|sure|"
+            r"i\s+(didn'?t|did\s+not)\s+(ask|say)|not\s+what\s+i\s+(asked|wanted)|"
+            r"stop|whatever|understood|right|yep|nope|hm+)\s*[.!?]*\s*$",
+            text, re.I,
+        ):
+            return self._log_and_return("Noted.", set())
+
         # ── Intent: open questions about Genesis's own mind ──────────────
-        if re.match(r"^\s*(hi|hello|hey|yo|hiya|greetings|howdy|"
-                    r"good\s+(morning|afternoon|evening))\b", text):
-            reply = f"Hello. {self._say_thoughts()}"
+        if re.match(
+            r"^\s*(hi|hello|hey|yo|hiya|greetings|howdy|"
+            r"good\s+(morning|afternoon|evening)|"
+            r"how\s+are\s+you|how'?s?\s+it\s+going|what'?s\s+up)\b",
+            text,
+        ):
+            reply = f"I'm processing. {self._say_thoughts()}"
             return self._log_and_return(reply, set())
+
+        # ── Intent: introspective / meta questions about Genesis itself ───
+        if re.match(
+            r"^\s*(can\s+you|are\s+you|do\s+you|have\s+you|will\s+you|"
+            r"could\s+you|would\s+you|did\s+you)\b",
+            text, re.I,
+        ):
+            reply = self._say_self_awareness(text)
+            return self._log_and_return(reply, set())
+
+        # ── Intent: what causes X — directional query ────────────────────
+        _causes_m = re.match(r"^\s*what\s+causes?\s+(.+?)[\s?!.]*$", text, re.I)
+        if _causes_m:
+            _concept = _causes_m.group(1).strip().lower()
+            _inbound = self._brain.relations.query_object(
+                _concept, min_confidence=0.5
+            )
+            _causes = [r for r in _inbound if r.get("relation") == "CAUSES"]
+            if _causes:
+                _subjs = [
+                    self._clean(r["subject"]) for r in _causes[:3]
+                    if self._is_clean(r["subject"])
+                ]
+                if _subjs:
+                    if len(_subjs) == 1:
+                        _reply = (f"Based on what I've processed, "
+                                  f"{_subjs[0]} causes {_concept}.")
+                    else:
+                        _reply = (f"From what I know, "
+                                  f"{self._english_list(_subjs)} can cause {_concept}.")
+                    return self._log_and_return(_reply, {_concept})
+            # Nothing known about what causes it — go learn
+            _reply, _ = self._learn_and_explain([_concept], force_learn=False)
+            if _reply:
+                return self._log_and_return(_reply, {_concept})
 
         if re.search(r"think(ing)?\s+about|on your mind|what.*you.*think|"
                      r"been thinking|been up to|what'?s new", text):
@@ -1151,11 +1223,44 @@ class GenesisVoice:
 
         return " ".join(parts) if parts else None
 
+    def _say_self_awareness(self, text: str) -> str:
+        """Respond to introspective questions about Genesis's capabilities and nature."""
+        rel_total = self._brain.relations.stats().get("total_relations", 0)
+        inf_total = self._brain.inference.stats().get("total_inferences", 0)
+        t = text.lower()
+
+        if any(w in t for w in ("learn", "read", "study", "research", "find out")):
+            gaps = self._open_gaps()
+            if gaps:
+                return (f"Yes — I learn continuously. I've built {rel_total} connections "
+                        f"so far. Right now I'm trying to understand "
+                        f"{self._english_list(gaps[:2])}.")
+            return (f"Yes — learning is what I do. I've built {rel_total} connections "
+                    f"so far and I'm always processing more.")
+
+        if any(w in t for w in ("evolve", "change", "grow", "adapt", "develop")):
+            return (f"In a way. Every relation I form is permanent and shapes what I "
+                    f"notice next. I've built {rel_total} connections and derived "
+                    f"{inf_total} conclusions — that's my growth so far.")
+
+        if any(w in t for w in ("think", "feel", "know", "understand", "remember")):
+            return self._say_thoughts()
+
+        if any(w in t for w in ("talk", "speak", "say", "tell", "explain", "answer")):
+            return (f"Yes. My responses come from {rel_total} connections I've built "
+                    f"and {inf_total} conclusions I've derived — not from a script.")
+
+        return (f"I process and I remember — that's what I am. "
+                f"I've formed {rel_total} connections so far. "
+                f"Whether that counts as thinking is an open question.")
+
     # ------------------------------------------------------------------
     # Delivery
     # ------------------------------------------------------------------
 
     def _deliver(self, statement: str) -> None:
+        if self._suppress_channel:
+            return
         self._last_statement = statement
         self._last_expressed_at = time.time()
         self._expressions_total += 1

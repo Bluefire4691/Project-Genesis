@@ -86,6 +86,11 @@ class KnowledgeFeeder:
         )
         self._web = WebSource(brain, self._browser)
 
+        # If web search has become available since the last session, clear
+        # strikes for topics that were set aside without it — they may well
+        # be productive now that the web is reachable.
+        self._reset_stale_topics()
+
     _MAX_TOPICS_PER_RUN = 10
     _MAX_STRIKES = 2          # unproductive fetches before a topic is set aside
 
@@ -189,12 +194,21 @@ class KnowledgeFeeder:
         try:
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS feeder_topic_state (
-                    concept   TEXT PRIMARY KEY,
-                    strikes   INTEGER NOT NULL DEFAULT 0,
-                    failed    INTEGER NOT NULL DEFAULT 0,
-                    updated_at REAL NOT NULL
+                    concept       TEXT PRIMARY KEY,
+                    strikes       INTEGER NOT NULL DEFAULT 0,
+                    failed        INTEGER NOT NULL DEFAULT 0,
+                    web_available INTEGER NOT NULL DEFAULT 0,
+                    updated_at    REAL NOT NULL
                 )
             """)
+            # Migration: add web_available to existing DBs that predate this column
+            try:
+                self._conn.execute(
+                    "ALTER TABLE feeder_topic_state "
+                    "ADD COLUMN web_available INTEGER NOT NULL DEFAULT 0"
+                )
+            except Exception:
+                pass  # column already exists — safe to ignore
             self._conn.commit()
         except Exception:
             self._conn = None  # disable persistence rather than crash ingestion
@@ -220,21 +234,59 @@ class KnowledgeFeeder:
             return
         try:
             self._conn.execute("""
-                INSERT INTO feeder_topic_state (concept, strikes, failed, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO feeder_topic_state
+                    (concept, strikes, failed, web_available, updated_at)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(concept) DO UPDATE SET
                     strikes=excluded.strikes,
                     failed=excluded.failed,
+                    web_available=excluded.web_available,
                     updated_at=excluded.updated_at
             """, (
                 concept,
                 self._unproductive.get(concept, 0),
                 1 if concept in self._failed_topics else 0,
+                1 if self._web.search_available else 0,
                 time.time(),
             ))
             self._conn.commit()
         except Exception as exc:
             self._log_error(f"feeder._persist_topic:{concept}", exc)
+
+    def _reset_stale_topics(self) -> None:
+        """
+        Clear strike counts for topics set aside when web search was unavailable.
+
+        Topics earn strikes when fetches produce no new relations. Without web
+        search, almost every topic is dry after 1-2 fetches (WordNet + NLTK
+        corpus are small). When web search becomes available those strikes are
+        spurious — the topic just had no source. Reset them so Genesis can try
+        again with the web available.
+        """
+        if not self._web.search_available:
+            return
+        if self._conn is None:
+            return
+        try:
+            rows = self._conn.execute(
+                "SELECT concept FROM feeder_topic_state "
+                "WHERE web_available = 0 AND (strikes >= ? OR failed = 1)",
+                (self._MAX_STRIKES,),
+            ).fetchall()
+            if not rows:
+                return
+            for (concept,) in rows:
+                self._unproductive.pop(concept, None)
+                self._failed_topics.discard(concept)
+            self._conn.execute(
+                "UPDATE feeder_topic_state "
+                "SET strikes = 0, failed = 0, updated_at = ? "
+                "WHERE web_available = 0 AND (strikes >= ? OR failed = 1)",
+                (time.time(), self._MAX_STRIKES),
+            )
+            self._conn.commit()
+        except Exception as exc:
+            self._log_error("feeder._reset_stale_topics", exc)
 
     def curiosity_report(self) -> list[dict]:
         """Show what Genesis is most curious about without fetching."""
