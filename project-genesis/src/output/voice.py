@@ -482,12 +482,20 @@ class GenesisVoice:
             return "I'm still early in my thinking — not much is on my mind yet."
         top = names[0]
         prose = self._pull_prose_about(top.lower(), n=1)
+        # Append a drive-state phrase when a drive is strong enough to mention
+        drive_phrase = ""
+        drives = getattr(self._brain, "drives", None)
+        if drives is not None:
+            drive_phrase = drives.expressive_state() or ""
+            if drive_phrase:
+                drive_phrase = " " + drive_phrase
+
         if prose:
             rest = (f" I've also been thinking about "
                     f"{self._english_list(names[1:])}." if len(names) > 1 else "")
-            return f"Lately I've been thinking about {top}. {prose[0]}{rest}"
+            return f"Lately I've been thinking about {top}. {prose[0]}{rest}{drive_phrase}"
         return (f"Lately I've been building up what I know about "
-                f"{self._english_list(names)}.")
+                f"{self._english_list(names)}.{drive_phrase}")
 
     def _say_curiosity(self) -> str:
         """What Genesis genuinely wants to learn — from its curiosity frontier."""

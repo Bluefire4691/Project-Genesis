@@ -133,9 +133,10 @@ duplication; the roadmap is the authoritative source of truth for project state.
 | M23–M24 | ✅ | Progressive language acquisition (Stage 0→3), conversational on-demand learning |
 | Infrastructure | ✅ | Assess→Stabilise→Verify→Realign cycle; DEF-001/002/003 fixed; all except:pass → error_log; 906 tests |
 | M25 | ✅ | Autonomous web browsing: Playwright + requests + trafilatura; robots.txt; rate limiting; paywall detection + user escalation; serendipitous link following driven by spreading activation |
-| M26 | 🔲 | Self-model: Genesis knows what it knows (confidence, coverage, contested beliefs) |
-| M27 | 🔲 | Deliberative integration: auditable decision log across subsystems |
-| M28 | 🔲 | Persistent goal formation: goals beyond session-level directives |
+| M26 | ✅ | Drive system: five biological-analog internal pressures (hunger/frustration/anticipation/boredom/dissonance) that update each cycle, persist across sessions, and surface in conversation |
+| M27 | 🔲 | Self-model: Genesis knows what it knows (confidence, coverage, contested beliefs) |
+| M28 | 🔲 | Deliberative integration: auditable decision log across subsystems |
+| M29 | 🔲 | Persistent goal formation: goals beyond session-level directives |
 
 ---
 

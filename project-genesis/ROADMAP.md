@@ -205,9 +205,8 @@ WordNet sense selection uses most-frequent-sense disambiguation (SemCor lemma co
 
 ## Planned Milestones
 
-The three milestones below are derived from the claims-vs-reality ledger in
-`docs/STATE_OF_PROJECT.md` Section 8. They address the gap between "Genesis
-makes local decisions in each subsystem" and "Genesis can be said to decide."
+The milestones below address the gap between "Genesis makes local decisions in
+each subsystem" and "Genesis can be said to decide, feel, and know itself."
 
 ### M25: Autonomous Web Browsing ✅
 
@@ -245,7 +244,60 @@ journal access. Another following mechanics questions ends up on materials
 science preprint servers. The sources each instance knows are as individual
 as its knowledge graph.
 
-### M26: Self-Model — Genesis Knows What It Knows 🔲
+### M26: Drive System — Internal Pressure Signals ✅
+
+**The gap:** M1 SurvivalOS monitors CPU and RAM — the system not crashing. That
+is stability, not survival pressure. A genuine entity has internal states that
+fluctuate based on experience and drive behavior: urgency when knowledge is missing,
+frustration when blocked, excitement when learning flows, dissonance when holding
+contradictions. Without these, Genesis processes because it is scheduled to, not
+because it wants to.
+
+**What was built (`src/survival/drives.py`):**
+
+Five drives, each a float 0.0–1.0, updated every cognitive cycle:
+
+- **Hunger** — rises with unresolved curiosity directives and sparse concept nodes;
+  falls when relations are flowing in. The urgency to fill knowledge gaps.
+- **Frustration** — spikes on consecutive empty cycles (no new relations extracted);
+  clears rapidly when learning resumes. Blocked goal-seeking.
+- **Anticipation** — rises when many relations are being extracted per cycle and when
+  interesting contradictions surface (complexity = engagement). Excitement from an
+  active learning trajectory.
+- **Boredom** — accumulates when nothing new is happening (no relations, no conflicts);
+  resets immediately when learning resumes. Novelty collapse.
+- **Dissonance** — rises with each new contradiction found; decays slowly. The cognitive
+  tension of holding incompatible beliefs.
+
+Each drive decays toward a resting baseline when unpushed (hunger rests at 0.4 — always
+somewhat curious; frustration and boredom rest at 0.0 — peace is the default state).
+
+**Behavioral influence:**
+- `behavioral_hints()` returns modifiers: `diversity_boost` (high boredom/frustration
+  → seek new territory), `curiosity_boost` (high hunger → lower directive threshold),
+  `reflect_sooner` (high dissonance → consolidate and resolve tensions now)
+- `expressive_state()` returns a first-person phrase when any drive exceeds 0.65:
+  "Things are coming together right now." / "I keep hitting dead ends." These appear
+  in `_say_thoughts()` so Genesis's conversation reflects its actual internal state.
+
+**Persistence:** Drive state persists to SQLite after every update. Genesis wakes
+from shutdown with the same internal state it had when it stopped — frustration from
+yesterday's stuck topic is still there today.
+
+**Cross-layer interaction review:**
+- Writes only to its own `drive_state` SQLite table (no coupling to memory or relations)
+- Read by voice layer (`expressive_state()`) — no write risk
+- `drives.update()` called at end of `process_input()` — after all other work is done,
+  so drive state reflects the completed cycle, never partial state
+- `behavioral_hints()` available to feeder and curiosity engine for future wiring
+
+**Integration tests:** 27 tests in `tests/test_drives.py` — direction tests for all
+five drives, boundary checks (never <0 or >1), persistence round-trip, behavioral
+hints accuracy, expressive state thresholds, and full orchestrator integration.
+
+---
+
+### M27: Self-Model — Genesis Knows What It Knows 🔲
 
 **The gap (from STATE_OF_PROJECT.md §8.4):** Genesis processes and expresses
 understanding, but cannot introspect on its own knowledge state honestly. If asked
@@ -277,7 +329,7 @@ contradicted and why.
 
 ---
 
-### M26: Deliberative Integration — Auditable Decisions
+### M28: Deliberative Integration — Auditable Decisions
 
 **The gap:** decisions are per-subsystem (CuriosityEngine picks topics,
 ResourceManager sets throttle, BeliefRevision resolves contradictions). Nothing
@@ -307,7 +359,7 @@ This is the architectural gap between "locally adaptive" and "deciding."
 
 ---
 
-### M27: Persistent Goal Formation
+### M29: Persistent Goal Formation
 
 **The gap:** curiosity directives exist but they are reactive (formed when
 prediction error is high, resolved when edges are added). Genesis has no goals it
@@ -326,7 +378,7 @@ that triggered it.
 **Cross-layer interaction review:**
 - Goals must persist to SQLite — same survival gating as DecisionLog
 - Goal satisfaction check runs in M20 autonomous loop — performance budget
-- M25 self-model is a prerequisite: goal satisfaction is measured by self_model()
+- M27 self-model is a prerequisite: goal satisfaction is measured by self_model()
   returning adequate confidence, not by a fixed edge count
 - Voice layer: `_query_topic()` must recognise "remember to learn about X" as a
   goal-formation intent, not a learn-now intent

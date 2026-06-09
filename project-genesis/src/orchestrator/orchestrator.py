@@ -171,6 +171,15 @@ class Orchestrator:
         # Maps concept → prediction_error at time of registration.
         self._curiosity_directives: dict[str, float] = self._load_directives()
 
+        # M26: Drive system — internal biological-analog pressure signals.
+        # Five drives (hunger/frustration/anticipation/boredom/dissonance) that
+        # update each cognitive cycle and influence topic selection, diversity,
+        # and reflection timing. Restored before the first cycle so Genesis
+        # wakes with the same internal state it had when it stopped.
+        from survival.drives import DriveSystem
+        self.drives = DriveSystem(_conn)
+        self.drives.restore()
+
         # Restore previous session state if requested
         if resume:
             restored = self._session_manager.restore(self)
@@ -545,6 +554,16 @@ class Orchestrator:
                 )
                 if revised > 0 and self.survival.can("logging"):
                     self._log(f"  ✏️  {revised} belief(s) revised by evidence weight")
+
+        # M26: Update drive states from this cycle's outcome
+        from survival.drives import CycleStats
+        self.drives.update(CycleStats(
+            relations_added=relations_added,
+            new_conflicts=new_conflicts,
+            stored_keys_count=len(stored_keys),
+            directive_count=len(self._curiosity_directives),
+            cycle_number=self.cycle_count,
+        ))
 
         return stored_keys, new_conflicts
 
