@@ -32,6 +32,15 @@ import time
 import queue
 import threading
 
+# Windows terminals default to CP1252; force UTF-8 so Unicode output renders
+# correctly in both the conversation window and any file-tailing window.
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, Exception):
+        pass
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 from orchestrator.orchestrator import Orchestrator
@@ -162,7 +171,7 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
         result = brain.process_input(item["type"], item["data"])
 
         if result.get("status") == "paused":
-            print(f"\n  ⏸  PAUSED at cycle {i+1}: {result.get('reason')}")
+            print(f"\n  [PAUSED] at cycle {i+1}: {result.get('reason')}")
             print(f"  Observer detected: {brain.interaction._observer.report()['recommendation']}")
             print(f"  Call brain.interaction.resume() to continue.")
             break
@@ -218,7 +227,7 @@ def run_open_stage(brain, n_cycles: int = 100, verbose: bool = True,
     if snap and snap.attention_top:
         _header("WHAT GENESIS IS ATTENDING TO")
         for item in snap.attention_top[:10]:
-            bar = "█" * int(item["relevance"] * 20)
+            bar = "#" * int(item["relevance"] * 20)
             print(f"  {bar:<20} [{item['relevance']:.2f}] {item['key']}")
             print(f"    {item['context'][:70]}")
         print()
@@ -255,7 +264,7 @@ class _ThoughtLog:
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             self._f = open(path, "w", encoding="utf-8")
-            self._f.write("  Genesis — live stream of thought\n")
+            self._f.write("  Genesis - live stream of thought\n")
             self._f.write("  (this window is read-only; talk to Genesis in the other window)\n\n")
             self._f.flush()
         except Exception:
@@ -364,7 +373,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
     last_reflect  = 0
     last_save     = time.time()
     last_pulse    = time.time()
-    current_topic = "—"   # tracks what Genesis is currently reading about
+    current_topic = "-"   # tracks what Genesis is currently reading about
     _AUTOSAVE_INTERVAL = 120.0  # auto-save every 2 minutes
     _PULSE_INTERVAL    = 90.0   # quiet foreground "still here" pulse
     _REFLECT_EVERY     = 400    # Genesis "sleeps" and consolidates every N cycles
@@ -481,8 +490,8 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                                     for s in salient[:6]
                                 )
                                 ts = e.get("created_at", "")[:16].replace("T", " ")
-                                arrow = "→" if i < len(entries) else "■"
-                                print(f"  {arrow} [{i}] {ts}  —  {concepts or '(none)'}")
+                                arrow = "->" if i < len(entries) else " *"
+                                print(f"  {arrow} [{i}] {ts}  -  {concepts or '(none)'}")
                             print()
                             latest_summary = entries[-1].get("summary", "")
                             if latest_summary:
@@ -542,7 +551,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                                if not r.get("already_fetched")]
                     if targets:
                         current_topic = targets[0]
-                        think.write(f"→ reading about: {', '.join(targets)}")
+                        think.write(f"-> reading about: {', '.join(targets)}")
                     report = brain.fetch_knowledge(n_topics=fetch_topics, verbose=False)
                     new_inf = brain.inference.run(session_id=brain.session_id)
                     rel_added = report.get("relations_added", 0)
@@ -552,7 +561,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                             parts.append(f"+{rel_added} relations")
                         if new_inf > 0:
                             parts.append(f"+{new_inf} inferences")
-                        think.write(f"→ learned: {', '.join(parts)}")
+                        think.write(f"-> learned: {', '.join(parts)}")
                 except Exception as e:
                     think.write(f"[fetch error: {e}]")
                 last_fetch = cycles
@@ -562,7 +571,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
                 try:
                     rep = brain.reflect(cycle=cycles)
                     think.write("")
-                    think.write(f"═══ REFLECTION [cycle {cycles}] ═══")
+                    think.write(f"=== REFLECTION [cycle {cycles}] ===")
                     if rep.get("summary"):
                         think.write(f"  {rep['summary']}")
                     if rep.get("salient"):
@@ -602,7 +611,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
             # which is exactly what it's for.
             if now - last_pulse >= _PULSE_INTERVAL:
                 rel_count = brain.relations.stats().get("total_relations", 0)
-                think.write(f"· still here — {cycles} cycles, {rel_count} relations")
+                think.write(f". still here - {cycles} cycles, {rel_count} relations")
                 last_pulse = now
 
             time.sleep(_CYCLE_SLEEP)
@@ -616,7 +625,7 @@ def run_live(brain, fetch_topics: int = 3, adaptive: bool = True):
         try:
             rep = brain.reflect(cycle=cycles)
             think.write("")
-            think.write(f"═══ FINAL REFLECTION [cycle {cycles}] ═══")
+            think.write(f"=== FINAL REFLECTION [cycle {cycles}] ===")
             if rep.get("summary"):
                 print(f"\n  Genesis: {rep['summary']}")
                 think.write(f"  {rep['summary']}")
@@ -940,8 +949,8 @@ def run_interactive(brain):
                         for s in salient[:6]
                     )
                     ts = e.get("created_at", "")[:16].replace("T", " ")
-                    arrow = "→" if i < len(entries) else "■"
-                    print(f"  {arrow} [{i}] {ts}  —  {concepts or '(no salient concepts)'}")
+                    arrow = "->" if i < len(entries) else " *"
+                    print(f"  {arrow} [{i}] {ts}  -  {concepts or '(no salient concepts)'}")
                 print()
                 # Show the most recent summary as a capstone
                 latest_summary = entries[-1].get("summary", "")
