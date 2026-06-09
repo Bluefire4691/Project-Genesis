@@ -119,44 +119,22 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 
 ---
 
-## Current Milestone: M9 complete
+## Current Milestone: M24 complete — next: M25 (Self-Model)
 
-| Milestone | Status | Summary |
-|-----------|--------|---------|
-| M1 | ✅ | SurvivalOS: resource management, directives, resilience |
-| M2 | ✅ | Total-retention memory, two-tier (working + long-term) |
-| M3 | ✅ | Interaction layer: Observer, Expression, association |
-| M4 | ✅ | Multi-processor integration, cross-modal synthesis |
-| M5 | ✅ | Curriculum pipeline: FOUNDATION→RELATIONS→REASONING→OPEN |
-| M6 | ✅ | Session persistence, rich pattern recognition, ArchiveStore |
-| M7 | ✅ | Relationship extraction, RelationGraph, typed semantic graph |
-| M8 | ✅ | Education data expansion: 119-item pool, 14 domains |
-| M9 | ✅ | AdaptiveStream: attention-weighted input selection, feedback loop |
-| — | ✅ | Self-directed ingestion: WordNet + corpus, curiosity frontier (graph gaps → vocabulary), never plateaus |
-| — | ✅ | ConsolidationEngine: self-authored reflection ("sleep"), salience from own signals, persists across sessions |
-| — | ✅ | Individuality: reflection-salient concepts bias curiosity + adaptive attention; instances diverge from same seed |
-| — | ✅ | Conversation: intent-aware, grounded in reflection/graph, never leaks raw tokens, always learns |
-| M10 | ✅ | Inference engine: transitive chains, IS_A inheritance, bridge rules, cross-session |
-| M11 | ✅ | Contradiction detection: CAUSES↔PREVENTS etc., logged, never overwritten |
-| M12 | ✅ | Ethics through experience: EthicsLens surfaces emergent causal patterns |
-| M13 | ✅ | Voice: intent-aware conversation grounded in graph/reflection/inference |
-| M14 | ✅ | Observer calibration: empirical thresholds from archive data (ACT-R utility learning + SOAR chunking); wired into reflect(); persists across sessions |
-| — | ✅ | Wake greeting: session-start first-person account of what Genesis has been thinking |
-| — | ✅ | Adaptive weights: consolidation engine tunes its own salience formula per instance |
-| — | ✅ | Conversational memory: within-session topic tracking; follow-up detection and response |
-| — | ✅ | Reasoning chains: inferences show derivation path ("runs through X → Y"); "what are you up to?" intent |
-| — | ✅ | Interest history: `history` command shows evolution of salient concepts across all reflections |
-| M15 | ✅ | Prediction error salience: archive significance driven by belief-model surprise (Friston-grounded), not heuristic wm_delta |
-| — | ✅ | Interoception: Genesis samples its own internal state (energy, memory pressure, inference/reflection counts) as a numeric sensory stream every 50 cycles |
-| M16 | ✅ | Processor voting: independent processor agreement boosts relation confidence (Hawkins — multiple columns voting raises certainty) |
-| M17 | ✅ | Active curiosity directives: high-pred-error concepts become persistent attention targets; AdaptiveStream scores directive items 2× higher; directives auto-resolve at 3+ relations; cross-session persistent (SOAR impasse→subgoal) |
-| M18 | ✅ | Belief revision: evidence-weighted contradiction resolution (REVISE/RESIST/TENSION); corroboration provenance ledger (independent sessions, not citation count); source trust tracks per-session reliability and cascades when a source is discredited (Wakefield principle); beliefs demoted to floor, never erased (total retention); full audit trail of what Genesis changed its mind about and why |
-| M19 | ✅ | Spreading activation: ACT-R associative retrieval — current attention window primes graph-adjacent concepts; BFS with decay-per-hop and confidence modulation; memory.search() accepts activation_boost; query() surfaces primed_concepts; makes retrieval associative not just lexical (Collins & Loftus 1975, Anderson 1983) |
-| M20 | ✅ | Autonomous cognitive loop: daemon thread that runs between interactions — follows curiosity directives, re-evaluates belief tensions, periodic reflection; adapts pace; errors never stop the loop; `tick_once()` for testing; full status telemetry |
-| M21 | ✅ | Knowledge synthesis: graph-to-language — expresses understanding by traversing actual relation graph with typed sentence frames; corroboration counts from belief revision; multi-hop causal chains; tensions and curiosity surfaced as epistemic gaps; consolidation reflections now use real synthesis not templates |
-| M22 | ✅ | Pattern transfer: structural role fingerprinting (Gentner 1983 structure-mapping) — Jaccard similarity over RELATION_DIRECTION token sets; five abstract roles (REGULATOR/MEDIATOR/OUTCOME/INHIBITOR/DEPENDENCY); analog pairs stored in DB; curiosity_from_analogs() identifies concepts with same role but missing expected edges; hooked into reflect() |
-| M23 | ✅ | Progressive language acquisition: expression grows with understanding (Stage 0→3 based on memory hits + relations); Stage 1 echoes actual retained prose from memory; Stage 2 composes 2–3 sentences from retained text + derived relation; Stage 3 weaves prose + inference chain narration; `_say_thoughts()` surfaces real sentences not just concept names; `_compose_inference()` grounds derivations in processed language — no LLM, all language drawn from what Genesis actually read |
-| — | ✅ | End-to-end integration tests: real Orchestrator + real WordNet, verifying relation growth, retention, frontier honesty, chunker structure; chunker rewritten to never drop sentences for length (was silently discarding the cleanest causal structures); feeder exhaustion state persists across sessions (was resetting every restart); Gutenberg cache-first with 5-min offline cooldown (was permanently latching offline after one failure); live UI liveness pulse routed to thought log (was clobbering user input) |
+**Full milestone history is in `ROADMAP.md`.** This table is kept brief here to avoid
+duplication; the roadmap is the authoritative source of truth for project state.
+
+| Range | Status | What was built |
+|---|---|---|
+| M1–M9 | ✅ | Survival OS, memory, interaction, multi-processor, open-stage data, persistence, relation extraction, education data, adaptive stream |
+| M10–M13 | ✅ | Inference engine, contradiction detection, ethics-through-experience, voice |
+| M14–M19 | ✅ | Observer calibration, prediction-error salience, processor voting, active curiosity, belief revision, spreading activation |
+| M20–M22 | ✅ | Autonomous cognitive loop, knowledge synthesis, pattern transfer |
+| M23–M24 | ✅ | Progressive language acquisition (Stage 0→3), conversational on-demand learning |
+| Infrastructure | ✅ | Assess→Stabilise→Verify→Realign cycle; DEF-001/002/003 fixed; all except:pass → error_log; 906 tests |
+| M25 | 🔲 | Self-model: Genesis knows what it knows (confidence, coverage, contested beliefs) |
+| M26 | 🔲 | Deliberative integration: auditable decision log across subsystems |
+| M27 | 🔲 | Persistent goal formation: goals beyond session-level directives |
 
 ---
 

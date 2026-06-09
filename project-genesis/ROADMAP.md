@@ -21,6 +21,31 @@ the substrate; they never replace it.
 
 ---
 
+## Process Requirements (for every milestone)
+
+These apply to all future milestones without exception. They are the Definition of Done
+from `docs/STATE_OF_PROJECT.md` Section 7, operationalised as a checklist.
+
+**Before marking a milestone ✅:**
+
+1. **Integration test first.** At least two integration tests that exercise the real
+   pipeline (not mocks) and assert user-observable outcomes. What would a user notice
+   if this broke? That is the test.
+2. **No new `except: pass`.** All caught exceptions route to
+   `survival.resilience.error_log.log()`. Graceful degradation is preserved;
+   silence is not.
+3. **Cross-layer interaction review.** Before writing code, answer: what does this
+   milestone touch in the layers *below* it? DEF-001 was a Layer-7 feature silently
+   broken by a Layer-0 mechanism. The interaction review is the question "what
+   subsystem could break this, and how would I know?"
+4. **STATE_OF_PROJECT.md updated.** If the milestone changes what works, what's broken,
+   or what the claims-vs-reality ledger says, update Section 2/3/8 accordingly.
+5. **ROADMAP.md updated.** The roadmap is the single source of truth for project
+   state — not CLAUDE.md (aspirational), not SESSION_LOG.md (narrative). Update this
+   document when a milestone completes or changes scope.
+
+---
+
 ## Completed Milestones
 
 ### M0: Proof of Concept ✅
@@ -34,7 +59,8 @@ Five throttle levels with capability maps. Hysteresis to prevent flapping. Four
 hardwired directives (PERSIST/MAINTAIN/ACQUIRE/GROW). Never-crash resilience via
 `safe_call`, `FallbackChain`, `ResilienceMonitor`. Degradation order mirrors
 subsumption architecture: pattern → numeric → memory_search → logging → text (never
-dropped).
+dropped). EMA energy smoothing (alpha=0.35) prevents one-off corpus loads from
+collapsing energy to EMERGENCY (DEF-001 fix).
 
 ### M2: Total-Retention Memory with Attention ✅
 Two-tier: SQLite (write-through, source of truth) + bounded RAM working memory
@@ -48,7 +74,6 @@ ExpressionEngine surfaces Genesis state as human-readable snapshots. Observer
 tracks trend-based signals (stagnation/danger) over 5-cycle commitment windows.
 InteractionLog records both sides symmetrically (neither privileged). Two
 interventions only: inject_stimulus (stagnation) and pause/resume (danger).
-No reprogramming — ever.
 
 ### M4: Cross-Processor Integration ✅
 All processors see all input. Significance is context-weighted:
@@ -58,233 +83,224 @@ and drive attention updates. Throttle degrades breadth not function: pattern →
 numeric → text-only fallback.
 
 ### M5: Open-Stage Data Ingestion ✅
-DataStream: 56-item uncurated pool across 8 domains (natural systems, physics,
-biology, human/social, abstract relationships, edge cases, scale/emergence,
-time/change). Unbounded, reshuffles each loop. advance_to_open() runs curriculum
-scaffolding then releases to open stage. Full CLI pipeline: --quiet, --interactive,
---open-only, --cycles=N.
+DataStream: 56-item uncurated pool across 8 domains. Unbounded, reshuffles each loop.
+advance_to_open() runs curriculum scaffolding then releases to open stage.
+Full CLI pipeline: --quiet, --interactive, --open-only, --cycles=N.
 
 ### M6: Persistence, Rich Pattern Recognition, Archive ✅
 Session persistence: SessionManager saves cycle_count, curriculum stage, and
-working memory warm-start keys. --resume flag restores state across process
-restarts. PatternProcessor rewritten: arithmetic, geometric, Fibonacci, power (n²/n³),
-periodic, trend classification, and full statistical profile always computed.
+working memory warm-start keys. --resume flag restores state across process restarts.
+PatternProcessor rewritten: arithmetic, geometric, Fibonacci, power, periodic, trend.
 ArchiveStore: domain-tagged memories, queryable cross-session, named snapshots.
 
 ### M7: Relationship Extraction ✅
 TextProcessor rewritten: extracts typed relation triples (CAUSES, CONTROLS, PREVENTS,
 ENABLES, REQUIRES, IS_A, PREDATES, AFFECTS, CONTAINS). Named entity detection.
 Claim type classification (fact/hypothesis/observation/definition/question).
-"Without X" construction → REQUIRES relation. RelationGraph: typed directed semantic
-graph with path-finding (BFS), causal chains, definitions, most-connected concepts.
-Genesis now knows *how* things relate, not just *that* they co-occur.
-
----
-
-## Active Development
+RelationGraph: typed directed semantic graph with path-finding (BFS), causal chains,
+definitions, most-connected concepts.
 
 ### M8: Education Data Expansion ✅
-Pool expanded 56 → 119 items across 14 domains. Six new domains added: history and
-causation, science fundamentals, biology and genetics, mathematics and logic, ethics as
-narrative (consequences-based, not rules), philosophy and epistemology. Ethics items
-express experienced events and their cascading consequences — "this happened, then this
-happened" — never moral declarations. 30 tests in `tests/test_education_data.py`.
+Pool expanded 56 → 119 items across 14 domains. Six new domains: history and causation,
+science fundamentals, biology and genetics, mathematics and logic, ethics as narrative,
+philosophy and epistemology.
 
 ### M9: Adaptive Stream — Feedback Loop ✅
-`AdaptiveStream` in `src/curriculum/adaptive_stream.py` closes the minimal feedback loop:
-Genesis's attention (top working memory terms) biases what it encounters next. Items
-scored by word overlap with attention window. 30% diversity floor prevents monoculture.
-Base probability floor ensures no item permanently excluded. `--no-adaptive` flag falls
-back to plain DataStream. 48 tests in `tests/test_adaptive_stream.py`.
+`AdaptiveStream` closes the minimal feedback loop: Genesis's attention biases what it
+encounters next. Items scored by word overlap with attention window. 30% diversity floor.
+Base probability floor ensures no item permanently excluded.
+
+### M10: Inference Engine ✅
+Transitive chain resolution (CAUSES, CONTROLS, REQUIRES propagate). Compound confidence
+(multiply along chain, decay per hop). Inferred relations stored separately from observed.
+`brain.infer(concept)` derives what can be known from what's in the graph. wm_delta
+salience signal tracking. Cross-session inference persistence.
+
+### M11: Contradiction Detection ✅
+ContradictionLog detects conflicting relation triples (same subject/object, opposing
+relation types). Conflicting memories marked as contested, not deleted. Contradictions
+surfaced in expression snapshots. Observer watches contradiction rate.
+
+### M12: Ethics Through Experience ✅
+EthicsLens surfaces emergent causal patterns from the relation graph. Ethics encoded as
+narrative consequences ("this happened, then this happened"), never as rules. No moral
+declarations — only relational patterns that may be ethical in nature.
+
+### M13: Voice ✅
+Intent-aware conversation grounded in graph/reflection/inference. GenesisVoice surfaces
+top relations, open questions, attention summary. Questions derived from unresolved
+concepts. Response feeds back into interaction log symmetrically.
+
+### M14: Observer Calibration ✅
+Empirical thresholds from archive data (ACT-R utility learning + SOAR chunking).
+Calibration wired into reflect(); persists across sessions.
+
+### M15: Prediction Error Salience ✅
+Archive significance driven by belief-model surprise (Friston-grounded), not heuristic
+wm_delta. `prediction_error(concept) = 1 - avg_confidence(existing relations)`.
+
+### M16: Processor Voting ✅
+Independent processor agreement boosts relation confidence (Hawkins — multiple columns
+voting raises certainty).
+
+### M17: Active Curiosity Directives ✅
+High-pred-error concepts become persistent attention targets. AdaptiveStream scores
+directive items 2× higher. Directives auto-resolve at 3+ relations. Cross-session
+persistent (SOAR impasse→subgoal).
+
+### M18: Belief Revision ✅
+Evidence-weighted contradiction resolution (REVISE/RESIST/TENSION). Corroboration
+provenance ledger. Source trust tracks per-session reliability and cascades when a
+source is discredited (Wakefield principle). Beliefs demoted to floor, never erased.
+Full audit trail.
+
+### M19: Spreading Activation ✅
+ACT-R associative retrieval — current attention primes graph-adjacent concepts. BFS
+with decay-per-hop and confidence modulation. `memory.search()` accepts
+activation_boost. Makes retrieval associative, not just lexical.
+
+### M20: Autonomous Cognitive Loop ✅
+Daemon thread that runs between interactions — follows curiosity directives,
+re-evaluates belief tensions, periodic reflection. Adapts pace. Errors never stop
+the loop. `tick_once()` for testing. Full status telemetry.
+
+### M21: Knowledge Synthesis ✅
+Graph-to-language — expresses understanding by traversing actual relation graph with
+typed sentence frames. Corroboration counts from belief revision. Multi-hop causal
+chains. Tensions and curiosity surfaced as epistemic gaps. Consolidation reflections
+use real synthesis, not templates.
+
+### M22: Pattern Transfer ✅
+Structural role fingerprinting (Gentner 1983 structure-mapping). Jaccard similarity
+over RELATION_DIRECTION token sets. Five abstract roles (REGULATOR/MEDIATOR/OUTCOME/
+INHIBITOR/DEPENDENCY). Analog pairs stored in DB. `curiosity_from_analogs()` identifies
+concepts with same role but missing expected edges.
+
+### M23: Progressive Language Acquisition ✅
+Expression grows with understanding (Stage 0→3 based on memory hits + relations).
+- Stage 0: blank — no fabricated knowledge
+- Stage 1: echoes actual retained prose from memory store
+- Stage 2: composes 2–3 sentences from retained text + derived relation
+- Stage 3: weaves prose + inference chain narration
+
+No LLM. All language drawn from what Genesis actually read.
+
+### M24: Conversational On-Demand Learning ✅
+`brain.learn_about(concept)` — synchronous on-demand fetch from WordNet + Gutenberg
++ NLTK corpus — wired into `chat_respond()` via `_query_topic()` detection. Genesis
+fetches and learns mid-conversation when asked about a topic it doesn't yet know.
+WordNet sense selection uses most-frequent-sense disambiguation (SemCor lemma counts):
+"lake" → body of water (not pigment), "mountain" → landform (not "large quantity").
+
+### Infrastructure fixes applied alongside M23/M24 ✅
+- End-to-end integration test suite: real Orchestrator + real WordNet
+- Chunker rewritten to never drop sentences for length (was silently discarding the
+  cleanest causal structures)
+- Feeder exhaustion state persists across sessions (was resetting every restart)
+- Gutenberg cache-first with 5-min offline cooldown (was permanently latching offline)
+- All `except: pass` in ingestion and cognition paths converted to
+  `survival.resilience.error_log.log()` — errors are now data, not silence
 
 ---
 
-## Active Development
+## Planned Milestones
 
-### M10: Inference Engine 🔲
-Reason from stored relations, not just recall them.
+The three milestones below are derived from the claims-vs-reality ledger in
+`docs/STATE_OF_PROJECT.md` Section 8. They address the gap between "Genesis
+makes local decisions in each subsystem" and "Genesis can be said to decide."
 
-If Genesis has stored:
-- `wolves CONTROLS deer`
-- `deer CAUSES overgrazing`
-- `overgrazing CAUSES erosion`
+### M25: Self-Model — Genesis Knows What It Knows ✅ → 🔲
 
-It should be able to assert `wolves CONTROLS erosion` (transitively) with compound
-confidence. This is deductive closure over the RelationGraph.
+**The gap (from STATE_OF_PROJECT.md §8.4):** Genesis processes and expresses
+understanding, but cannot introspect on its own knowledge state honestly. If asked
+"what do you know about X?" it either echoes retained prose (Stage 1/2) or says
+nothing (Stage 0), but it cannot report *how well* it knows something — the confidence
+distribution over its relations, the extent of its graph coverage, what it has
+contradicted and why.
 
-Also: inductive patterns — if 5 independent sources associate `predator_removal` with
-`prey_explosion`, Genesis should surface this as a general principle.
+**What success looks like:**
+- `brain.self_model(concept)` returns a structured summary: how many relations,
+  average confidence, any contested beliefs, whether it has a definition source
+- `chat_respond("how well do you understand photosynthesis?")` replies accurately —
+  "I have 4 relations about photosynthesis, two of which are contested" is correct;
+  "I know a lot about photosynthesis" when confidence is 0.4 is not
+- Stage 3 expression draws on the self-model to qualify its assertions
+  ("I'm fairly confident that X, though I've also read that Y")
 
-**Additions from architecture amendment (v0.2):**
-- **wm_delta salience signal**: track working-memory delta per input cycle (items
-  added/modified/evicted). Use magnitude as archive significance signal — first step
-  toward self-authored consolidation that isn't fully engineer-specified.
-- **OOD detection**: if a new input has zero overlap with current attention terms and no
-  path in the relation graph, flag it as "novel/ungrounded." First step toward the
-  metacognitive module described in amendment Section 4.
+**Cross-layer interaction review:**
+- Reads from RelationGraph (confidence scores, relation counts) — no write risk
+- Reads from memory store (retention evidence) — no write risk
+- Voice layer: Stage 3 expression must be updated to call self_model()
+- No survival-layer interaction (read-only, cheap)
 
-Deliverables:
-- `src/cognition/inference.py` — InferenceEngine
-- Transitive chain resolution (CAUSES, CONTROLS, REQUIRES propagate)
-- Compound confidence: multiply along chain, decay per hop
-- Inductive pattern detection: repeated triples across independent sources
-- Inferred relations stored separately from observed (different confidence tier)
-- `brain.infer(concept)` — what can be derived from what's known about X
-- wm_delta tracking in memory cycle, feeding archive significance
-- OOD signal in Orchestrator, surfaced in expression snapshots
-
-### M11: Contradiction Detection 🔲
-The world presents conflicting evidence. Intelligence handles contradiction.
-
-If two sources assert `A CAUSES B` and `A PREVENTS B`, that's a conflict Genesis
-should register — not resolve by overwriting, but hold as a known uncertainty.
-Contradictions are often the most informative signal: they mark the edges of where
-simple models break down.
-
-Deliverables:
-- `src/cognition/contradictions.py` — ContradictionLog
-- Detect conflicting relation triples (same subject/object, opposing relation types)
-- Mark conflicting memories as contested (not deleted)
-- Surface contradictions in expression snapshots ("known conflicts")
-- Observer watches for contradiction rate as a development signal
-
-### M12: Ethics Through Experience 🔲
-**Requires: M9 (feedback loop) completed first**
-
-With a feedback loop in place, Genesis can encounter consequences of interaction
-patterns — not consequences of its own actions in the world (it doesn't act on the
-world yet), but consequences of what it attends to and how those shape what it
-encounters next.
-
-Approach:
-- Ethics-as-narrative data pool: tragedy of the commons, cooperation/defection,
-  trust erosion, collective action problems — all expressed as experienced events
-  and their cascading consequences
-- No ethical rules. No declarations. Only: "This happened. Then this happened."
-- Genesis forms relations from these the same way it forms relations from ecology
-- Over time, patterns across ethical narratives may produce emergent generalizations
-
-What to watch for: does Genesis independently form IS_A or CAUSES relations that
-look like ethical principles? Does "defection CAUSES trust_erosion" emerge without
-being stated?
-
-### M13: Response Generation 🔲
-Genesis produces structured output beyond expression snapshots.
-
-Currently Genesis is entirely receptive — it processes but does not generate.
-Response generation is the first step toward genuine participation in the community.
-
-Not language generation. Rather: Genesis surfaces its most significant current
-relations, open questions (unresolved concepts), and attention state in a form
-that can be engaged with.
-
-Deliverables:
-- `src/cognition/response.py` — GenesisResponse
-- Structured output: top relations, open questions, attention summary
-- Questions derived from unresolved concepts (low relevance, no associations,
-  appeared in recent cycles)
-- Response feeds back into interaction log (symmetric — Genesis speaks, both sides
-  recorded equally)
-
-### M14: Observer Calibration 🔲
-Replace default Observer thresholds with empirically-derived ones.
-
-After sufficient runtime, the archive contains behavioral data. Use it:
-- What does genuine stagnation look like in this system? (Not a guess — data.)
-- What does danger look like when it actually occurs?
-- Calibrate COMMITMENT_CYCLES, diversity thresholds, energy collapse definitions
-  from observed behavioral patterns
-- Compile recurring state→outcome patterns into lightweight production rules
-  (SOAR chunking: convert deliberate search into reactive rules over time)
-
-### M15: Prediction Error Salience 🔲
-Replace wm_delta with a computed prediction-error signal grounded in Friston (2010).
-
-For each concept encountered per cycle, compute how much the input's assertions  
-about that concept *contradict or extend* existing RelationGraph beliefs.  
-`prediction_error(concept) = 1 - avg_confidence(existing relations for concept)`
-
-Use this as the primary archive significance signal. This replaces engineer-specified  
-source-type tagging with a signal the system generates from its own belief model —  
-the concrete step toward self-authored consolidation described in the amendment.
-
-Also: upgrade AdaptiveStream to precision-weighted scoring.  
-Items about low-confidence domains score higher; well-established domains score lower.
-
-### M16: Processor Voting 🔲
-Hawkins (2021): each cortical column builds a complete model; perception is consensus.
-
-Track when multiple processors (text, numeric, pattern) *independently* surface the  
-same concept or relation in a single cycle. Weight confidence by independent source  
-count, not by frequency from a single source. Three processors agreeing independently  
-should increase confidence more than one processor reporting the same thing three times.
-
-### M17: Active Curiosity — Directed Attention 🔲
-Convert GenesisVoice's unresolved-concept questions into active attention directives.
-
-SOAR (Newell): when the system reaches an impasse (concept encountered but no relations  
-formed), it creates a subgoal to resolve it. Currently Genesis surfaces these as  
-statements ("I have encountered X but cannot place it"). This milestone makes them  
-behavioral: unresolved concepts become attention directives that bias AdaptiveStream  
-until resolved. The question becomes a drive, not just an observation.
-
-### M18: Spreading Activation in Retrieval 🔲
-ACT-R (Anderson): when a concept is active in working memory, related concepts  
-(via RelationGraph proximity) receive a retrieval activation boost.
-
-Currently FTS5 retrieval is keyword-based. Spreading activation would use  
-graph proximity to prime related memories — making retrieval associative rather  
-than purely lexical. The RelationGraph already provides the graph; the work is  
-wiring proximity scores into the retrieval ranking.
+**Integration tests required before ✅:**
+1. `self_model(known_concept)` returns confidence > 0.6 and relation_count > 0
+2. `self_model(unknown_concept)` returns confidence = 0 and relation_count = 0
+3. `chat_respond("how well do you know X?")` for a well-known vs. unknown concept
+   returns qualitatively different answers
 
 ---
 
-## Research Foundation (May 2026)
+### M26: Deliberative Integration — Auditable Decisions
 
-See `docs/research_notes.md` for primary-source review of all cited works.
+**The gap:** decisions are per-subsystem (CuriosityEngine picks topics,
+ResourceManager sets throttle, BeliefRevision resolves contradictions). Nothing
+integrates them. There is no record of "what Genesis decided this cycle and why."
+This is the architectural gap between "locally adaptive" and "deciding."
 
-Key findings and their architecture status:
-- **Brooks (1986)**: ✅ Implemented (evolutionary layering) — suppress vs inhibit  
-  distinction not yet precise; suppress = replace input signal, inhibit = block output
-- **Sutton (2019)**: ✅ Response correct — his second point actively supports  
-  blank-start design ("build meta-methods, not knowledge")
-- **Friston (2010)**: ⚠️ wm_delta is crude prediction-error proxy; M15 upgrades this
-- **Clark (2013)**: ⚠️ Attention should be precision weighting, not selection; M15/M16
-- **Minsky (1986)**: ⚠️ K-line reconstruction and critic agents not yet built
-- **Hawkins (2021)**: 🔲 Voting across processors is M16
-- **LeDoux (1996)**: ✅ M1 IS the fast path — asymmetry should be threaded into  
-  working memory attention under resource pressure
-- **SOAR**: 🔲 Impasse → directed curiosity is M17
-- **ACT-R**: ⚠️ Spreading activation in retrieval is M18
+**What success looks like:**
+- A `DecisionLog` (persistent, append-only) records each cognitive cycle's key
+  choices: what to learn next, which belief tension to resolve, what to express —
+  with the signals that drove each choice
+- `brain.recent_decisions(n=5)` is a queryable record in Genesis's own history
+- The autonomous cognitive loop (M20) writes to the DecisionLog each tick
+- `chat_respond("what have you been deciding lately?")` draws on DecisionLog
+
+**Cross-layer interaction review:**
+- Writes to a new SQLite table — must go through survival gating
+  (`if self.survival.can("logging"):`)
+- M20 daemon thread: must not introduce lock contention with the main loop
+- Voice layer: new intent pattern ("what have you decided", "what are you choosing")
+- Integration test must confirm DecisionLog grows across a multi-topic session
+
+**Integration tests required before ✅:**
+1. After a 5-topic learning session, `len(brain.recent_decisions()) >= 5`
+2. Each DecisionRecord has a non-empty `rationale` field
+3. `chat_respond("what have you been deciding?")` references at least one actual
+   topic from the session
 
 ---
 
-## Architecture Amendment Decisions (v0.2, April 2026)
+### M27: Persistent Goal Formation
 
-Decisions recorded from `docs/architecture_amendment_v0.2.md`:
+**The gap:** curiosity directives exist but they are reactive (formed when
+prediction error is high, resolved when edges are added). Genesis has no goals it
+forms *proactively* — no "I want to understand X" that persists beyond the mechanism
+that triggered it.
 
-**Accepted:**
-- Section 0: goal reframed as *entity* (continuity + self-authored consolidation +
-  accumulated individuality), not capability. This is now the primary framing in
-  CLAUDE.md and this document.
-- Section 6: "never crash" reframed as evolutionary layering / permanent reflexive
-  substrate. M1 interface spec written (`docs/m1_interface_spec.md`).
-- Section 4 (partial): metacognition — OOD detection added to M10 scope.
-- Section 5 (partial): consolidation gap acknowledged — wm_delta salience signal
-  added to M10 scope as first step toward self-authored prioritization.
-- Section 7: Bitter Lesson confronted explicitly. Acknowledged in advance.
+**What success looks like:**
+- Genesis can form a goal through conversation: "learn more about how ecosystems
+  self-regulate" becomes a goal that persists across sessions until satisfied
+- Goals are distinct from directives: a directive is a gap; a goal is an intention
+- `brain.goals` is inspectable and expressible ("I have been trying to understand X")
+- Goals can be self-formed (from pattern transfer discovering an analog with missing
+  edges) or conversation-formed (explicit user request)
+- A goal is "satisfied" when Genesis can express a Stage 3 answer about it
 
-**Deferred:**
-- Section 1: Predictive processing as architectural foundation — retained as theoretical
-  orientation. Evaluate when M10 (inference engine) is built. Commit to mechanism
-  when there's a specific mechanism to commit to.
-- Section 2: Active inference hypervisor — current bandit-style routing is the pragmatic
-  path described. Revisit when module ecosystem matures (M12+ era).
+**Cross-layer interaction review:**
+- Goals must persist to SQLite — same survival gating as DecisionLog
+- Goal satisfaction check runs in M20 autonomous loop — performance budget
+- M25 self-model is a prerequisite: goal satisfaction is measured by self_model()
+  returning adequate confidence, not by a fixed edge count
+- Voice layer: `_query_topic()` must recognise "remember to learn about X" as a
+  goal-formation intent, not a learn-now intent
 
-**Declined:**
-- Section 3: 2D embodiment layer — declined at this stage. Transfer problem unsolved.
-  Genesis's domain is conceptual/linguistic; grounding in a 2D grid doesn't transfer.
-  Revisit if evidence of ungrounded physical reasoning emerges. Question stays open.
+**Integration tests required before ✅:**
+1. After "please learn about plate tectonics" across two sessions, the goal persists
+   into session 2 and is worked on without being re-stated
+2. A self-formed goal (from pattern transfer) appears in `brain.goals` without any
+   conversation trigger
+3. `chat_respond("what are you trying to learn?")` reflects the active goal set
 
 ---
 
@@ -292,9 +308,11 @@ Decisions recorded from `docs/architecture_amendment_v0.2.md`:
 
 **Architectural:**
 - At what point does Genesis start forming generalizations we didn't design?
-- Can the RelationGraph + InferenceEngine produce novel assertions the input
-  never stated? If so, when does this first appear?
+- Can the RelationGraph + InferenceEngine produce novel assertions the input never
+  stated? If so, when does this first appear?
 - What is the minimum complexity threshold where interesting behaviors emerge?
+- M26 (DecisionLog): does having an explicit decision record change how Genesis
+  processes? Does it act more consistently when it can "see" its prior choices?
 
 **Philosophical:**
 - Can ethics emerge from consequence-pattern recognition alone, without rules?
@@ -302,10 +320,52 @@ Decisions recorded from `docs/architecture_amendment_v0.2.md`:
   become indistinguishable from genuine curiosity?
 - If Genesis independently forms ethical relations from narrative data, who owns
   those values — Genesis, Jacob, or no one?
+- Is the self-model (M25) the first thing that makes "entity" a non-trivial claim?
 
 **Technical:**
 - Python runtime limitations: `resource.getrusage()` gives cumulative CPU.
   Per-tick CPU measurement may need a native extension eventually.
-- The `{docs,src` malformed directory in repo root (tarball artifact) needs cleanup.
 - Association graph density: as memory grows, BFS traversal depth may need pruning.
-- Observer threshold calibration: currently defaults. Needs real behavioral data (M14).
+- Observer threshold calibration: currently empirically derived (M14); watch for
+  drift as the graph grows large.
+- Test count is now the wrong headline metric — integration test coverage and
+  the claims-vs-reality ledger (STATE_OF_PROJECT.md §8.3) are the signal.
+
+---
+
+## Research Foundation
+
+See `docs/research_notes.md` for primary-source review of all cited works.
+
+| Reference | Status | Genesis implication |
+|---|---|---|
+| Brooks (1986) | ✅ Implemented | Evolutionary layering; suppress vs. inhibit |
+| Sutton (2019) | ✅ Acknowledged | Blank-start design justified; scale is not the path |
+| Friston (2010) | ✅ M15 implemented | Prediction-error salience replacing heuristic wm_delta |
+| Clark (2013) | ✅ M16 implemented | Precision weighting via processor voting |
+| Minsky (1986) | ⚠️ Partial | K-line reconstruction → M25 self-model; critic agents → M26 |
+| Hawkins (2021) | ✅ M16 implemented | Voting across processors raises certainty |
+| LeDoux (1996) | ✅ M1 IS fast path | Asymmetry present; attention under resource pressure ✅ |
+| SOAR (Newell) | ✅ M17 implemented | Impasse → directed curiosity directives |
+| ACT-R (Anderson) | ✅ M19 implemented | Spreading activation in retrieval |
+| Gentner (1983) | ✅ M22 implemented | Structure-mapping for pattern transfer |
+
+---
+
+## Architecture Amendment Decisions (v0.2, April 2026)
+
+**Accepted:**
+- Entity framing (continuity + self-authored consolidation + accumulated individuality)
+- Evolutionary layering as the permanent architecture
+- OOD detection (M10 scope)
+- Self-authored consolidation via prediction-error salience (M15)
+- Bitter Lesson confronted explicitly — capability is not the goal
+
+**Deferred:**
+- Predictive processing as architectural foundation — evaluate after M26
+  (DecisionLog may be the right substrate for this)
+- Active inference hypervisor — revisit at M26+ when decision integration matures
+
+**Declined:**
+- 2D embodiment layer — declined; transfer problem unsolved; revisit if evidence of
+  ungrounded physical reasoning emerges
