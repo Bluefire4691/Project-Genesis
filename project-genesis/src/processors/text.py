@@ -317,10 +317,32 @@ def _extract_relations(sentence: str) -> tuple[list[dict], list[str]]:
     """
     Extract typed relation triples from a single sentence.
 
-    Returns: (list of relation dicts, list of marker strings found)
+    Tries the spaCy dependency-parse extractor first when available.
+    Falls back to regex matching when spaCy is not installed.
 
+    Returns: (list of relation dicts, list of marker strings found)
     Each relation dict: {subject, relation, object, confidence}
-    Subjects and objects are cleaned (stopwords stripped, max 3 words, lowercase).
+    """
+    from processors.spacy_extractor import (  # local import — keeps startup fast
+        SPACY_AVAILABLE, extract_relations_spacy, markers_for_relations,
+    )
+    if SPACY_AVAILABLE:
+        rels = extract_relations_spacy(sentence)
+        if rels:
+            return rels, markers_for_relations(rels)
+        # spaCy parsed but found nothing structural — still fall through to
+        # regex so simple patterns like "X is a Y" are not silently dropped.
+
+    return _extract_relations_regex(sentence)
+
+
+def _extract_relations_regex(sentence: str) -> tuple[list[dict], list[str]]:
+    """
+    Regex-based relation extractor (fallback when spaCy is unavailable).
+
+    One relation per sentence: the highest-priority matching pattern wins.
+    This prevents a single sentence from spawning overlapping mangled
+    triples when multiple patterns fire on the same predicate span.
     """
     sent_lower = sentence.lower().strip()
     if not sent_lower:
@@ -348,7 +370,6 @@ def _extract_relations(sentence: str) -> tuple[list[dict], list[str]]:
             "object": obj,
             "confidence": confidence,
         })
-        # Record the trigger word(s)
         for marker in ("caused", "led to", "resulted in", "controls", "prevents",
                        "enables", "requires", "eats", "feeds on", "preys on",
                        "is a", "is an", "depends on", "involved in", "role in",
@@ -357,10 +378,7 @@ def _extract_relations(sentence: str) -> tuple[list[dict], list[str]]:
                 markers_found.append(marker)
                 break
 
-        # One relation per sentence — the highest-priority matching pattern
-        # wins. This prevents a single sentence from spawning overlapping,
-        # mangled triples (e.g. "force refers to", "force refers", "force").
-        break
+        break  # first match wins
 
     return relations, markers_found
 
@@ -400,14 +418,21 @@ def _clean_concept(raw: str) -> str:
     # Strip leading stopwords
     while words and words[0].lower() in _STOPWORDS:
         words = words[1:]
-    # Strip trailing stopwords
+    # Cap BEFORE trailing strip — prevents dangling prepositions like
+    # "deer populations in" when "regions" at position 4 blocks the
+    # trailing strip from ever reaching "in" at position 2.
+    words = words[:3]
     while words and words[-1].lower() in _STOPWORDS:
         words = words[:-1]
-    # Cap length
-    words = words[:3]
     result = " ".join(words).lower().strip()
     # Remove non-alphanumeric except spaces
     result = re.sub(r"[^a-z0-9 ]", "", result).strip()
+    # Final trailing stopword strip — punctuation removal can expose new
+    # trailing stopwords (e.g. "populations," → "populations", "which" exposed)
+    words = result.split()
+    while words and words[-1] in _STOPWORDS:
+        words.pop()
+    result = " ".join(words)
     if len(result) < 2:
         return ""
     # Reject concepts with no real word — strips numeric/OCR junk like
