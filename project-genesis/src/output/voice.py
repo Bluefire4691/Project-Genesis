@@ -347,6 +347,20 @@ class GenesisVoice:
             reply = f"I'm processing. {self._say_thoughts()}"
             return self._log_and_return(reply, set())
 
+        # ── Intent: predictions / conjectures Genesis has formed ─────────
+        # Checked before the broad "do you…" self-awareness handler so that
+        # "do you have any theories?" surfaces the generative layer (Genesis's
+        # own claims) rather than a generic statement about what it is.
+        if re.search(
+            r"suspect|predict|your\s+(guess|hunch|theory|hypothes|conjecture)|"
+            r"\b(any|got\s+any|have\s+any)\s+(theories|hypothes|guesses|hunches|predictions)|"
+            r"do\s+you\s+think\s+.*(might|could|would|cause)|"
+            r"what.*you.*expect",
+            text, re.I,
+        ):
+            reply = self._say_predictions()
+            return self._log_and_return(reply, set())
+
         # ── Intent: introspective / meta questions about Genesis itself ───
         if re.match(
             r"^\s*(can\s+you|are\s+you|do\s+you|have\s+you|will\s+you|"
@@ -512,6 +526,72 @@ class GenesisVoice:
         return (f"I'm curious about {self._english_list(pick)} right now — I keep "
                 f"meeting them but can't fully explain them yet. "
                 f"Do you know much about any of those?")
+
+    def _say_predictions(self) -> str:
+        """
+        Surface what Genesis has conjectured for itself — the generative layer
+        in conversation. These are claims it authored by reasoning over its
+        graph, explicitly flagged as guesses, plus its track record as a
+        hypothesizer when it has one.
+        """
+        engine = getattr(self._brain, "hypotheses", None)
+        if engine is None:
+            return ("I haven't started forming predictions of my own yet — "
+                    "I'm still gathering what I'd reason from.")
+
+        try:
+            open_hyps = engine.open_hypotheses(limit=6)
+            stats = engine.stats()
+        except Exception:
+            open_hyps, stats = [], {}
+
+        if not open_hyps:
+            # Maybe it has resolved some — speak to its track record instead.
+            resolved = []
+            try:
+                resolved = engine.resolved_hypotheses(limit=3)
+            except Exception:
+                pass
+            if resolved:
+                r = resolved[0]
+                subj = self._clean(r["subject"])
+                verb = _REL_VERBS_BASE.get(r["rel_type"], r["rel_type"].lower())
+                obj = self._clean(r["object"] or "") or "something"
+                verdict = ("and the evidence has borne it out"
+                           if r["status"] == "confirmed"
+                           else "but what I've read since points the other way")
+                return (f"I'd guessed that {subj} might {verb} {obj}, {verdict}. "
+                        f"I'm not holding any open predictions just now.")
+            return ("Nothing I'd call a prediction yet — I form those by reasoning "
+                    "across what I've connected, and I need a bit more first.")
+
+        # Pick the most confident open conjecture and state it plainly.
+        h = open_hyps[0]
+        subj = self._clean(h["subject"])
+        verb = _REL_VERBS_BASE.get(h["rel_type"], h["rel_type"].lower())
+        obj = self._clean(h["object"] or "")
+
+        if h["basis"] == "analogy":
+            claim = (f"I suspect {subj} may {verb} something — it behaves "
+                     f"structurally like other things I know that do")
+        elif h["basis"] == "contradiction" and obj:
+            claim = (f"I think the link between {subj} and {obj} depends on a "
+                     f"condition I haven't identified — that would explain why "
+                     f"my sources disagree")
+        elif obj:
+            claim = f"I suspect {subj} may {verb} {obj}, though I haven't confirmed it"
+        else:
+            claim = f"I suspect {subj} may {verb} something I haven't pinned down"
+
+        # Add a second conjecture if there is one, and a calibration note.
+        tail = ""
+        if len(open_hyps) > 1:
+            tail = f" I'm holding {len(open_hyps)} open guesses like this right now."
+        hit = stats.get("hit_rate")
+        if hit is not None:
+            tail += (f" Of the ones I've been able to test, "
+                     f"about {int(round(hit * 100))}% held up.")
+        return f"{claim[0].upper()}{claim[1:]}.{tail}"
 
     def _open_gaps(self) -> list:
         """Clean concepts from the curiosity frontier Genesis hasn't explained."""

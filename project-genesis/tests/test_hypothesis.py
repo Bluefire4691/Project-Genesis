@@ -18,7 +18,29 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from cognition.hypothesis import HypothesisEngine
+from cognition.hypothesis import HypothesisEngine, _chain_linkable
+
+
+# ── Chain bridging across concept granularity ───────────────────────────────
+
+class TestChainLinkable:
+    def test_exact_match_links(self):
+        assert _chain_linkable("deer", "deer")
+
+    def test_single_word_bridges_to_multiword(self):
+        assert _chain_linkable("deer populations", "deer")
+        assert _chain_linkable("deer", "deer populations")
+
+    def test_unrelated_multiword_do_not_link(self):
+        assert not _chain_linkable("soil to erode", "new growth")
+
+    def test_short_or_generic_words_do_not_bridge(self):
+        assert not _chain_linkable("ice age", "ice")     # "ice" len 3 < 4
+        assert not _chain_linkable("many things", "things")  # generic filler
+
+    def test_substring_does_not_falsely_link(self):
+        # token-level only: "ice" must never link to "service"
+        assert not _chain_linkable("service", "ice")
 
 
 def _brain():

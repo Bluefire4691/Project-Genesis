@@ -47,6 +47,15 @@ _ANCHOR_CONF = 0.6
 # (something Genesis has met repeatedly but cannot explain)
 _GAP_MIN_INCOMING = 2
 
+# Classifier tags and processing artefacts that leak into memory keys and
+# directives but are not real subjects to read about.
+_TARGET_NOISE = frozenset({
+    "bigram", "trigram", "categories", "category", "sentiment", "neutral",
+    "definition", "observation", "sequence", "pattern", "concept", "concepts",
+    "keyword", "keywords", "token", "tokens", "control", "value", "values",
+    "data", "text", "number", "count", "result", "output", "input", "label",
+})
+
 # Verb phrasing for relation types, infinitive form for "may <verb>"
 _VERB_BASE = {
     "CAUSES": "cause", "CONTROLS": "govern", "PREVENTS": "prevent",
@@ -324,14 +333,41 @@ class ResearchProposal:
         return para, targets
 
     def _fallback_targets(self) -> list[str]:
-        """If nothing else named targets, fall back to the curiosity frontier."""
+        """
+        If nothing else named targets, fall back to real knowledge gaps —
+        concepts referenced but unexplained. Prefer these over raw curiosity
+        directives, which carry classifier noise ("bigram", "categories").
+        """
+        targets: list[str] = []
+        # Pure graph gaps: referenced as objects, never explained as subjects.
         try:
-            return [
-                t for t in self._brain.curiosity_directives()[:4]
-                if _is_clean(t)
-            ]
+            rows = self._conn.execute("""
+                WITH
+                  inc AS (SELECT LOWER(object) AS c, COUNT(*) AS n
+                          FROM relations GROUP BY LOWER(object)),
+                  out AS (SELECT LOWER(subject) AS c FROM relations)
+                SELECT inc.c FROM inc
+                WHERE inc.c NOT IN (SELECT c FROM out)
+                ORDER BY inc.n DESC LIMIT 12
+            """).fetchall()
+            for (concept,) in rows:
+                c = _clean(concept)
+                if _is_clean(c) and c not in _TARGET_NOISE and c not in targets:
+                    targets.append(c)
         except Exception:
-            return []
+            pass
+        # Top up from curiosity directives, filtered against known noise.
+        if len(targets) < 4:
+            try:
+                for t in self._brain.curiosity_directives():
+                    c = _clean(t)
+                    if _is_clean(c) and c not in _TARGET_NOISE and c not in targets:
+                        targets.append(c)
+                    if len(targets) >= 4:
+                        break
+            except Exception:
+                pass
+        return targets[:4]
 
     # ------------------------------------------------------------------
     # Rendering

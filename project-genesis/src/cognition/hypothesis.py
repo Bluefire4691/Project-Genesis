@@ -221,6 +221,13 @@ class HypothesisEngine:
         """
         A CAUSES B, B CAUSES C, but A→C not held → hypothesize A CAUSES C.
         Stays a prediction (not asserted as inference) until evidence appears.
+
+        The second hop links on B≈subject. Because the extractor emits concepts
+        at inconsistent granularity ("deer populations" in one sentence, "deer"
+        in the next), an exact-string join misses real chains. We bridge a single
+        content word to a multi-word concept that contains it ("deer" ↔ "deer
+        populations") — precise enough to avoid spurious links, loose enough to
+        survive the extractor's granularity.
         """
         rel = self._brain.relations
         try:
@@ -228,23 +235,21 @@ class HypothesisEngine:
         except Exception:
             return
 
-        # Index by subject for quick second-hop lookup
-        by_subject: dict[str, list[dict]] = {}
-        for edge in causes:
-            by_subject.setdefault(edge["subject"], []).append(edge)
-
         existing = {(e["subject"], e["object"]) for e in causes}
         for edge in causes:
             a, b = edge["subject"], edge["object"]
-            for second in by_subject.get(b, []):
-                c = second["object"]
-                if c == a or (a, c) in existing:
+            for second in causes:
+                if not _chain_linkable(b, second["subject"]):
                     continue
+                c = second["object"]
+                if c == a or c == b or (a, c) in existing:
+                    continue
+                bridge = b if b == second["subject"] else f"{b}/{second['subject']}"
                 rationale = (
-                    f"{a} causes {b}, and {b} causes {c}. If both hold, "
-                    f"{a} may cause {c} indirectly."
+                    f"{a} causes {b}, and {second['subject']} causes {c}. "
+                    f"If both hold, {a} may cause {c} indirectly."
                 )
-                yield (a, "CAUSES", c, "chain", b, rationale)
+                yield (a, "CAUSES", c, "chain", bridge, rationale)
 
     # ------------------------------------------------------------------
     # Verification — the falsifiability loop
@@ -472,3 +477,50 @@ class HypothesisEngine:
             self._brain.survival.resilience.error_log.log(label, exc)
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Chain bridging
+# ---------------------------------------------------------------------------
+
+# Words too generic to carry a chain link on their own.
+_CHAIN_STOP = frozenset({
+    "thing", "things", "something", "number", "numbers", "level", "levels",
+    "rate", "rates", "area", "areas", "part", "parts", "form", "forms",
+})
+
+
+def _chain_linkable(b: str, subject: str) -> bool:
+    """
+    True if the object `b` of one CAUSES edge can be the cause-end `subject`
+    of the next — exactly, or by single-content-word containment.
+
+    Exact match always links. Otherwise a *single* content word (len ≥ 4, not
+    a generic filler) links to a multi-word concept that contains it as a whole
+    token: "deer" ↔ "deer populations", but not "soil to erode" ↔ "new growth".
+    The containment must be token-level, never substring, so "ice" never links
+    to "service".
+    """
+    b = (b or "").strip().lower()
+    subject = (subject or "").strip().lower()
+    if not b or not subject:
+        return False
+    if b == subject:
+        return True
+
+    b_tokens = b.split()
+    s_tokens = subject.split()
+
+    def _bridges(word: str, tokens: list[str]) -> bool:
+        return (
+            len(word) >= 4
+            and word not in _CHAIN_STOP
+            and word in tokens
+        )
+
+    # b is a single word contained in subject's tokens, or vice versa
+    if len(b_tokens) == 1 and _bridges(b, s_tokens):
+        return True
+    if len(s_tokens) == 1 and _bridges(subject, b_tokens):
+        return True
+    return False
