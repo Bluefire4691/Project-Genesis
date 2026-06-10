@@ -161,6 +161,15 @@ class Orchestrator:
         self._proposal_every = 5
         self._reflection_count = 0
 
+        # M31: Inference Programs — declarative if-then rules Genesis authors
+        # by mining recurrent chain patterns in its own graph. Unlike M10's
+        # hard-coded bridge rules, M31 programs are empirically discovered,
+        # stored as named artifacts, and tracked for accuracy. Two instances
+        # that process different texts will write different rules — this is
+        # accumulated individuality expressed as program logic.
+        from cognition.inference_programs import InferenceProgramEngine
+        self.programs = InferenceProgramEngine(self)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -777,6 +786,23 @@ class Orchestrator:
                     self._log("  📝 Drafted a new research direction")
             except Exception as exc:
                 self.survival.resilience.error_log.log("reflect.research_proposal", exc)
+
+        # M31: mine for new rule patterns, run existing programs to derive
+        # new edges, then verify which derivations have since been confirmed.
+        # Mining runs after hypothesis generation so both layers see the same
+        # enriched graph state within this reflection pass.
+        try:
+            new_progs = self.programs.mine()
+            if new_progs > 0 and self.verbose:
+                self._log(f"  📐 {new_progs} inference program(s) authored")
+            new_deriv = self.programs.run_all()
+            if new_deriv > 0 and self.verbose:
+                self._log(f"  ⚙️  {new_deriv} derivation(s) from inference programs")
+            confirmed_deriv = self.programs.verify_derivations()
+            if confirmed_deriv > 0 and self.verbose:
+                self._log(f"  ✅ {confirmed_deriv} program derivation(s) confirmed")
+        except Exception as exc:
+            self.survival.resilience.error_log.log("reflect.programs", exc)
 
         return result
 

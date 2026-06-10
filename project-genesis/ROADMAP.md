@@ -462,8 +462,55 @@ points to the drafted direction when asked about plans.
 
 **Status:** ✅ — 14 tests in `test_research_proposal.py`; full suite 1006 passing.
 
-**Next generative component (future M31):** inference programs — declarative if-then
-chains executable by a resolution engine, making Genesis's knowledge operational.
+### M31: Inference Programs — Declarative Rule Authoring ✅
+
+**The gap:** M30 produces single hypotheses — one conjecture at a time, about a
+specific subject.  Genesis had no mechanism to *generalize* a pattern into a reusable
+rule.  M10's InferenceEngine runs rules the *engineer* wrote; nothing let Genesis
+discover and author rules from its own accumulated data.  Two instances that processed
+different texts would produce different knowledge graphs, but the same inference rules —
+the accumulated individuality didn't reach the reasoning layer.
+
+**What was built:** `src/cognition/inference_programs.py` — `InferenceProgramEngine`.
+
+Three phases, each adding a distinct capability:
+
+**1. Discovery** — Genesis scans its relation graph for recurrent two-hop chain
+patterns: cases where A --rel_a--> B --rel_b--> C co-occurs with a direct A --result_rel--> C
+shortcut.  A SQL three-way JOIN counts these; when ≥ 2 independent instances of the
+same (rel_a, rel_b, result_rel) triple appear, Genesis has empirical grounds for a rule.
+IS_A is excluded (M10 handles inheritance).
+
+**2. Authoring** — Each promoted pattern is stored as a named rule in the
+`inference_programs` table:  `rel_a + rel_b → result_rel`, evidence count, confidence
+(starts at 0.45 + 0.05 × extra evidence, capped at 0.75 — a new rule is a conjecture).
+The rule is a first-class artifact Genesis wrote.  It persists across sessions.
+
+**3. Execution + Tracking** — `run_all()` applies every stored rule to the full
+graph, deriving new edges stored in `program_derivations` (never in the `relations`
+table — observed facts stay clean).  `verify_derivations()` checks open derivations
+against later-observed edges; each confirmation increments the rule's `hit_count`.
+`stats()` reports a `hit_rate` — Genesis's calibration as a rule-author.
+
+**Why this produces accumulated individuality:**
+Two Genesis instances that processed different texts will mine different rules because
+their graphs have different chain patterns.  The programs Genesis authors are a record
+of what *this* instance found in its specific data — not a table the engineer wrote.
+An instance that read about ecology might author `CONTROLS + CAUSES → CAUSES`;
+one that read about circuits might discover `ENABLES + REQUIRES → ENABLES`.  Same
+mechanism, different programs.
+
+**Wiring:**
+- `reflect()` calls `mine()` then `run_all()` then `verify_derivations()` each pass,
+  after hypothesis generation so both layers see the same enriched graph
+- `GenesisVoice._compose_rule()` lets Genesis state a pattern it formalized:
+  "I've noticed that when one thing controls another, and that second thing causes a
+  third, the first tends to cause the third too — I found that pattern 3 times and made
+  it a rule I run across what I know"
+- `voice._say_rules()` handles direct queries ("what rules have you worked out?")
+- No LLM, no hard-coded patterns — pure empirical discovery from Genesis's own graph
+
+**Status:** ✅ — 20 tests in `test_inference_programs.py`; full suite 1031 passing.
 
 ---
 

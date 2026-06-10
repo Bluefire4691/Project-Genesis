@@ -139,6 +139,7 @@ duplication; the roadmap is the authoritative source of truth for project state.
 | M29 | 🔲 | Persistent goal formation: goals beyond session-level directives |
 | M30 | ✅ | Hypothesis engine: Genesis authors falsifiable predictions (analogy/contradiction/chain), tests them against later evidence, owns its hits and misses — its first generative organ |
 | M30.2 | ✅ | Research proposal: Genesis composes a first-person research direction (what it understands / can't explain / predicts / will read) from its own state — an authored artifact, not retrieved text |
+| M31 | ✅ | Inference programs: Genesis mines its own graph for recurrent chain patterns, authors declarative if-then rules empirically (no hard-coded logic), executes them to derive new edges, tracks hit rate — accumulated individuality expressed as program logic |
 
 ---
 

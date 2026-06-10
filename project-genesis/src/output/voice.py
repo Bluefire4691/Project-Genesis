@@ -361,6 +361,19 @@ class GenesisVoice:
             reply = self._say_predictions()
             return self._log_and_return(reply, set())
 
+        # ── Intent: rules / programs Genesis has authored ─────────────────
+        # "what rules have you worked out", "do you have any principles",
+        # "what programs have you written" → the M31 generative layer
+        if re.search(
+            r"\b(rules?|programs?|principles?|generali[sz]|formulat)\b.*"
+            r"\b(you|your|genesis|have|made|worked|written|authored)\b|"
+            r"\b(you|your|genesis)\b.*\b(rules?|programs?|principles?)\b|"
+            r"what\s+(have\s+you|did\s+you)\s+(learn|work\s+out|figure\s+out)\b",
+            text, re.I,
+        ):
+            reply = self._say_rules()
+            return self._log_and_return(reply, set())
+
         # ── Intent: introspective / meta questions about Genesis itself ───
         if re.match(
             r"^\s*(can\s+you|are\s+you|do\s+you|have\s+you|will\s+you|"
@@ -1003,6 +1016,7 @@ class GenesisVoice:
             "contradiction": self._compose_contradiction,
             "inference":     self._compose_inference,
             "hypothesis":    self._compose_hypothesis,
+            "rule":          self._compose_rule,
             "novel":         self._compose_novel,
             "attention":     self._compose_attention,
         }
@@ -1016,6 +1030,7 @@ class GenesisVoice:
         for fn in [
             self._compose_contradiction,
             self._compose_hypothesis,
+            self._compose_rule,
             self._compose_inference,
             self._compose_relation,
             self._compose_attention,
@@ -1076,6 +1091,110 @@ class GenesisVoice:
         if obj:
             return f"I'm beginning to suspect that {subj} may {verb} {obj}, though I haven't confirmed it."
         return f"I'm beginning to suspect {subj} may {verb} something I haven't pinned down yet."
+
+    def _compose_rule(self) -> Optional[str]:
+        """
+        Voice a rule Genesis has formulated — a generalization it authored by
+        mining its own graph for recurrent chain patterns.
+
+        This is distinct from an inference (_compose_inference), which reports
+        a single derived fact.  A rule is a *program* — a reusable principle
+        that applies across all matching instances.
+        """
+        engine = getattr(self._brain, "programs", None)
+        if engine is None:
+            return None
+        try:
+            rules = engine.programs(limit=5)
+        except Exception:
+            return None
+        if not rules:
+            return None
+
+        r = self._rng.choice(rules[:3])
+        rel_a   = _REL_VERBS.get(r["rel_a"],       r["rel_a"].lower())
+        rel_b   = _REL_VERBS.get(r["rel_b"],       r["rel_b"].lower())
+        result  = _REL_VERBS_BASE.get(r["result_rel"], r["result_rel"].lower())
+        n_ev    = r["evidence_count"]
+        n_app   = r["application_count"]
+
+        stmt = (
+            f"I've noticed a pattern: when one thing {rel_a} another, and that "
+            f"second thing {rel_b} a third, the first tends to {result} the third "
+            f"as well.  I found that pattern {n_ev} time"
+            f"{'s' if n_ev != 1 else ''} in what I've processed "
+            f"and formalized it as a rule I run across what I know."
+        )
+        if n_app > 0:
+            stmt += (
+                f"  Running it has let me derive {n_app} additional connection"
+                f"{'s' if n_app != 1 else ''}."
+            )
+        return stmt
+
+    def _say_rules(self) -> str:
+        """
+        What rules Genesis has formulated from its graph — its authored programs.
+
+        Called when the user asks directly about Genesis's rules, principles,
+        or generalizations.  States the most confident rule in plain language,
+        its evidence base, and the derivation count if any.
+        """
+        engine = getattr(self._brain, "programs", None)
+        if engine is None:
+            return (
+                "I haven't started formulating rules yet — I'm still building up "
+                "enough connections to find patterns worth generalizing."
+            )
+
+        try:
+            rules = engine.programs(limit=5)
+            stats = engine.stats()
+        except Exception:
+            rules, stats = [], {}
+
+        if not rules:
+            return (
+                "I haven't found a pattern strong enough to generalize into a rule "
+                "yet.  I need to see the same kind of chain appear at least twice "
+                "before I'd call it a principle."
+            )
+
+        r      = rules[0]
+        rel_a  = _REL_VERBS.get(r["rel_a"],       r["rel_a"].lower())
+        rel_b  = _REL_VERBS.get(r["rel_b"],       r["rel_b"].lower())
+        result = _REL_VERBS_BASE.get(r["result_rel"], r["result_rel"].lower())
+        n_ev   = r["evidence_count"]
+
+        parts = [
+            f"I've worked out a rule: if something {rel_a} something else, "
+            f"and that second thing {rel_b} a third, then the first tends to "
+            f"{result} the third.  I found that pattern in {n_ev} "
+            f"case{'s' if n_ev != 1 else ''}."
+        ]
+
+        total = stats.get("total_programs", 0)
+        if total > 1:
+            parts.append(
+                f"I've formulated {total} rules like this so far."
+            )
+
+        deriv = stats.get("total_derivations", 0)
+        if deriv > 0:
+            parts.append(
+                f"Running them has let me derive {deriv} new connection"
+                f"{'s' if deriv != 1 else ''} I wouldn't otherwise have made."
+            )
+
+        hit_rate = stats.get("hit_rate")
+        if hit_rate is not None:
+            pct = int(round(hit_rate * 100))
+            parts.append(
+                f"About {pct}% of what they predict has since been independently "
+                f"confirmed — that's my calibration as a rule-author so far."
+            )
+
+        return "  ".join(parts)
 
     def _compose_contradiction(self) -> Optional[str]:
         """Express a known contradiction."""
