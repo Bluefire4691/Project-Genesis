@@ -906,6 +906,7 @@ class GenesisVoice:
         composers = {
             "contradiction": self._compose_contradiction,
             "inference":     self._compose_inference,
+            "hypothesis":    self._compose_hypothesis,
             "novel":         self._compose_novel,
             "attention":     self._compose_attention,
         }
@@ -918,6 +919,7 @@ class GenesisVoice:
         # Default: try each type in priority order
         for fn in [
             self._compose_contradiction,
+            self._compose_hypothesis,
             self._compose_inference,
             self._compose_relation,
             self._compose_attention,
@@ -928,6 +930,56 @@ class GenesisVoice:
                 return stmt
 
         return None
+
+    def _compose_hypothesis(self) -> Optional[str]:
+        """
+        Voice one of Genesis's own conjectures — a claim it authored by
+        reasoning over its graph, not one it read anywhere.
+
+        Prefers a recently resolved hypothesis (Genesis was right, or wrong,
+        and that is worth saying), otherwise an open standing prediction.
+        """
+        engine = getattr(self._brain, "hypotheses", None)
+        if engine is None:
+            return None
+
+        resolved = engine.resolved_hypotheses(limit=8)
+        if resolved and self._rng.random() < 0.4:
+            h = self._rng.choice(resolved[:5])
+            subj = h["subject"].replace("_", " ")
+            verb = _REL_VERBS_BASE.get(h["rel_type"], h["rel_type"].lower())
+            obj = (h["object"] or "").replace("_", " ")
+            tail = f" {obj}" if obj else " something"
+            if h["status"] == "confirmed":
+                return (
+                    f"I had guessed that {subj} might {verb}{tail}, and what I've "
+                    f"read since bears it out."
+                )
+            return (
+                f"I had guessed that {subj} might {verb}{tail}, but the evidence "
+                f"I've since found points the other way. I was wrong about that."
+            )
+
+        open_hyps = engine.open_hypotheses(limit=8)
+        if not open_hyps:
+            return None
+        h = self._rng.choice(open_hyps[:5])
+        subj = h["subject"].replace("_", " ")
+        verb = _REL_VERBS_BASE.get(h["rel_type"], h["rel_type"].lower())
+        obj = (h["object"] or "").replace("_", " ")
+        if h["basis"] == "analogy":
+            return (
+                f"I suspect {subj} may {verb} something — it behaves structurally "
+                f"like other things I know that do. I want to find out if that holds."
+            )
+        if h["basis"] == "contradiction" and obj:
+            return (
+                f"I think the link between {subj} and {obj} depends on something "
+                f"I haven't identified yet — that would explain why my sources disagree."
+            )
+        if obj:
+            return f"I'm beginning to suspect that {subj} may {verb} {obj}, though I haven't confirmed it."
+        return f"I'm beginning to suspect {subj} may {verb} something I haven't pinned down yet."
 
     def _compose_contradiction(self) -> Optional[str]:
         """Express a known contradiction."""

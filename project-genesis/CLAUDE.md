@@ -137,6 +137,7 @@ duplication; the roadmap is the authoritative source of truth for project state.
 | M27 | 🔲 | Self-model: Genesis knows what it knows (confidence, coverage, contested beliefs) |
 | M28 | 🔲 | Deliberative integration: auditable decision log across subsystems |
 | M29 | 🔲 | Persistent goal formation: goals beyond session-level directives |
+| M30 | ✅ | Hypothesis engine: Genesis authors falsifiable predictions (analogy/contradiction/chain), tests them against later evidence, owns its hits and misses — its first generative organ |
 
 ---
 

@@ -392,6 +392,54 @@ that triggered it.
 
 ---
 
+### M30: Hypothesis Engine — Generative Cognition ✅
+
+**The gap (this was the first open architectural question, now answered):** until
+M30 every relation in the graph traced back to a sentence Genesis processed. The
+system absorbed structure at high bandwidth but produced none of its own. There was
+no path from the existing graph to a *new* claim — no conjecture, no original thought,
+only consumption.
+
+**What was built:** `src/cognition/hypothesis.py` — `HypothesisEngine`. Genesis now
+authors falsifiable predictions by reasoning over its own graph, stores them as its
+own conjectures (kept out of the relation graph so they cannot pollute fingerprinting
+or contradiction scans), and *tests* them against evidence acquired later. Conjecture,
+then seek the evidence that decides.
+
+Three generators, each grounded in a cited mechanism:
+- **Structural analogy** (Gentner 1983): if wolves PREVENTS overgrazing and lions is a
+  structural analog of wolves (M22 fingerprint match) but has no PREVENTS edge,
+  hypothesize lions PREVENTS something too — transferring relational structure across
+  a surface-dissimilar pair.
+- **Contradiction moderation:** a held X CAUSES Y / X PREVENTS Y tension implies a
+  hidden moderating variable; Genesis conjectures the relationship is conditional.
+- **Chain extension:** A CAUSES B and B CAUSES C held, A→C not — hypothesize A CAUSES C.
+  Unlike the InferenceEngine (which asserts transitive closure as derived fact), this
+  stays a *prediction* until independent evidence confirms it.
+
+**The falsifiability loop:** `verify()` runs each reflection pass. An open hypothesis
+whose predicted edge now appears in the graph is marked `confirmed` (and object-specified
+confirmations are promoted into the graph as a modest observed edge — Genesis's
+prediction became knowledge); one contradicted by an opposing observed edge is marked
+`refuted`. Nothing is deleted — a wrong guess is kept, because being wrong is part of
+Genesis's history. `stats()` reports a `hit_rate`: Genesis's own calibration as a
+hypothesizer.
+
+**Wiring:**
+- `reflect()` verifies-then-generates each pass; open-hypothesis subjects are pushed
+  into the curiosity frontier so Genesis goes reading for the deciding evidence
+- `GenesisVoice._compose_hypothesis()` lets Genesis speak its conjectures and own its
+  hits and misses ("I had guessed X… and what I've read since bears it out" /
+  "…but the evidence points the other way. I was wrong about that.")
+
+**Status:** ✅ — 13 tests in `test_hypothesis.py`; full suite 992 passing.
+
+**Next generative components (future M30.x / M31):** research-proposal generator (a
+first-person document combining best gap + analog + contradiction into an agenda) and
+inference programs (declarative if-then chains executable by a resolution engine).
+
+---
+
 ## Open Questions (Ongoing)
 
 **Architectural:**

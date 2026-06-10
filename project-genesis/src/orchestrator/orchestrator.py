@@ -144,6 +144,13 @@ class Orchestrator:
         from cognition.pattern_transfer import PatternTransfer
         self.pattern_transfer = PatternTransfer(self.relations, _conn)
 
+        # M30: Hypothesis engine — Genesis's first generative organ. Produces
+        # falsifiable predictions it authored itself (structural analogy,
+        # contradiction moderation, chain extension), then tests them against
+        # later evidence. Conjecture, then seek the evidence that decides.
+        from cognition.hypothesis import HypothesisEngine
+        self.hypotheses = HypothesisEngine(self)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -727,6 +734,27 @@ class Orchestrator:
                 self._save_directives()
         except Exception as exc:
             self.survival.resilience.error_log.log("reflect.pattern_transfer", exc)
+
+        # M30: generative cognition. Reflection is when the graph is richest, so
+        # it's the natural moment to (a) test standing predictions against any
+        # evidence acquired since, then (b) form new conjectures. Verify first
+        # so a hypothesis confirmed this pass isn't immediately re-proposed.
+        try:
+            resolved = self.hypotheses.verify()
+            if resolved > 0 and self.verbose:
+                self._log(f"  🔬 {resolved} hypothesis(es) resolved against new evidence")
+            new_hyps = self.hypotheses.generate()
+            if new_hyps > 0 and self.verbose:
+                self._log(f"  💡 {new_hyps} new hypothesis(es) formed")
+            # Open hypotheses are reasons to read: pull their subjects into the
+            # curiosity frontier so Genesis goes looking for the deciding evidence.
+            for concept in self.hypotheses.curiosity_targets():
+                if (concept not in self._curiosity_directives
+                        and len(self._curiosity_directives) < self._MAX_DIRECTIVES):
+                    self._curiosity_directives[concept] = 0.80
+            self._save_directives()
+        except Exception as exc:
+            self.survival.resilience.error_log.log("reflect.hypotheses", exc)
 
         return result
 
