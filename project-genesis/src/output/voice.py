@@ -640,6 +640,22 @@ class GenesisVoice:
             parts.append("Right now I'm turning over what I already have — "
                          "the frontier feels close.")
 
+        # If Genesis has drafted a research direction, point to it — this is the
+        # generative layer surfacing: not just "what's next" but a stance it
+        # composed about where its understanding should go.
+        research = getattr(self._brain, "research", None)
+        if research is not None:
+            try:
+                latest = research.latest()
+            except Exception:
+                latest = None
+            if latest and latest.get("focus") and self._is_clean(latest["focus"]):
+                parts.append(
+                    f"I've also written out a direction for myself around "
+                    f"{self._clean(latest['focus'])} — what I understand, what I "
+                    f"don't, and what I'd need to read to settle it."
+                )
+
         return " ".join(parts) if parts else "I'm still working out what I want to do next."
 
     def _curiosity_question(self, exclude: Optional[set] = None) -> Optional[str]:

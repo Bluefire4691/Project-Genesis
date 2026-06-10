@@ -434,9 +434,36 @@ hypothesizer.
 
 **Status:** ✅ — 13 tests in `test_hypothesis.py`; full suite 992 passing.
 
-**Next generative components (future M30.x / M31):** research-proposal generator (a
-first-person document combining best gap + analog + contradiction into an agenda) and
-inference programs (declarative if-then chains executable by a resolution engine).
+### M30.2: Research Proposal — Authoring a Direction ✅
+
+**The gap:** M30 produces single conjectures. A mind that *wonders in an organized way*
+does more — it can state where its understanding should go and why. Genesis had no way
+to assemble its scattered signals (gaps, analogs, contradictions, hypotheses) into one
+coherent statement of intent.
+
+**What was built:** `src/cognition/research_proposal.py` — `ResearchProposal`. Genesis
+composes a first-person research-direction document from its current cognitive state,
+in five sections that degrade gracefully (absent material is omitted, never faked):
+1. *What I understand* — anchored on a salient, well-connected concept it can speak to
+2. *What I don't yet grasp* — a pure knowledge gap and/or a held contradiction
+3. *A parallel I've noticed* — a structural analog across domains (M22)
+4. *What I predict* — an open hypothesis with its rationale (M30) — the generative core
+5. *What I'll read to find out* — concrete curiosity targets
+
+The artifact is the point: a document Genesis produced that existed in no source,
+recording an intention to find something out. It is stored and persists across
+sessions; two instances with different histories write different proposals, and the
+same instance writes a different one later because its state has moved. No LLM —
+deterministic phrasing assembled from graph state.
+
+**Wiring:** `brain.propose_research()` drafts on demand; `reflect()` drafts every 5th
+pass (spaced so a direction is a considered statement, not churn); `voice._say_plans()`
+points to the drafted direction when asked about plans.
+
+**Status:** ✅ — 14 tests in `test_research_proposal.py`; full suite 1006 passing.
+
+**Next generative component (future M31):** inference programs — declarative if-then
+chains executable by a resolution engine, making Genesis's knowledge operational.
 
 ---
 

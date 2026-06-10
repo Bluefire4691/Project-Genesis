@@ -151,6 +151,16 @@ class Orchestrator:
         from cognition.hypothesis import HypothesisEngine
         self.hypotheses = HypothesisEngine(self)
 
+        # M30.2: Research proposal — assembles gaps, analogs, contradictions, and
+        # open hypotheses into a first-person research direction. A document
+        # Genesis authors from its own state, not retrieved from any input.
+        from cognition.research_proposal import ResearchProposal
+        self.research = ResearchProposal(self)
+        # Drafts a proposal every Nth reflection (not every one — a research
+        # direction shouldn't churn faster than understanding moves).
+        self._proposal_every = 5
+        self._reflection_count = 0
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -756,7 +766,33 @@ class Orchestrator:
         except Exception as exc:
             self.survival.resilience.error_log.log("reflect.hypotheses", exc)
 
+        # M30.2: every Nth reflection, draft a research direction from current
+        # state. Spacing it out keeps the proposal a considered statement rather
+        # than noise that rewrites itself each pass.
+        self._reflection_count += 1
+        if self._reflection_count % self._proposal_every == 0:
+            try:
+                doc = self.research.compose()
+                if doc and self.verbose:
+                    self._log("  📝 Drafted a new research direction")
+            except Exception as exc:
+                self.survival.resilience.error_log.log("reflect.research_proposal", exc)
+
         return result
+
+    def propose_research(self) -> str | None:
+        """
+        Draft (and store) a research-direction document from Genesis's current
+        cognitive state: what it understands, what it can't yet explain, the
+        parallels it has noticed, what it predicts, and what it intends to read.
+
+        Returns the document text, or None if Genesis has too little to say yet.
+        """
+        try:
+            return self.research.compose()
+        except Exception as exc:
+            self.survival.resilience.error_log.log("propose_research", exc)
+            return None
 
     def latest_reflection(self) -> dict | None:
         """The most recent reflection — what Genesis has been thinking about."""
