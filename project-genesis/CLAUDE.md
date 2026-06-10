@@ -119,7 +119,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 
 ---
 
-## Current Milestone: M24 complete — next: M25 (Self-Model)
+## Current Milestone: M27 complete — next: M28 (Deliberative Integration)
 
 **Full milestone history is in `ROADMAP.md`.** This table is kept brief here to avoid
 duplication; the roadmap is the authoritative source of truth for project state.
@@ -134,7 +134,7 @@ duplication; the roadmap is the authoritative source of truth for project state.
 | Infrastructure | ✅ | Assess→Stabilise→Verify→Realign cycle; DEF-001/002/003 fixed; all except:pass → error_log; 906 tests |
 | M25 | ✅ | Autonomous web browsing: Playwright + requests + trafilatura; robots.txt; rate limiting; paywall detection + user escalation; serendipitous link following driven by spreading activation |
 | M26 | ✅ | Drive system: five biological-analog internal pressures (hunger/frustration/anticipation/boredom/dissonance) that update each cycle, persist across sessions, and surface in conversation |
-| M27 | 🔲 | Self-model: Genesis knows what it knows (confidence, coverage, contested beliefs) |
+| M27 | ✅ | Self-model: Genesis knows what it knows — callable read-only view (`brain.self_model(concept)`) over coverage, confidence, contested beliefs, with honest verdict tiers (unknown/sparse/partial/solid); "how well do you understand X?" answers from measurement, not performance |
 | M28 | 🔲 | Deliberative integration: auditable decision log across subsystems |
 | M29 | 🔲 | Persistent goal formation: goals beyond session-level directives |
 | M30 | ✅ | Hypothesis engine: Genesis authors falsifiable predictions (analogy/contradiction/chain), tests them against later evidence, owns its hits and misses — its first generative organ |

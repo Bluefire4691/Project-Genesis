@@ -297,35 +297,50 @@ hints accuracy, expressive state thresholds, and full orchestrator integration.
 
 ---
 
-### M27: Self-Model — Genesis Knows What It Knows 🔲
+### M27: Self-Model — Genesis Knows What It Knows ✅
 
-**The gap (from STATE_OF_PROJECT.md §8.4):** Genesis processes and expresses
-understanding, but cannot introspect on its own knowledge state honestly. If asked
-"what do you know about X?" it either echoes retained prose (Stage 1/2) or says
-nothing (Stage 0), but it cannot report *how well* it knows something — the confidence
-distribution over its relations, the extent of its graph coverage, what it has
-contradicted and why.
+**The gap (from STATE_OF_PROJECT.md §8.4):** Genesis processed and expressed
+understanding, but could not introspect on its own knowledge state honestly. Asked
+"what do you know about X?" it either echoed retained prose or said nothing — it
+could not report *how well* it knows something: confidence distribution, graph
+coverage, what it has contradicted and why. Dunning-Kruger as an architectural flaw:
+nothing in the system represented "I don't know this."
 
-**What success looks like:**
-- `brain.self_model(concept)` returns a structured summary: how many relations,
-  average confidence, any contested beliefs, whether it has a definition source
-- `chat_respond("how well do you understand photosynthesis?")` replies accurately —
-  "I have 4 relations about photosynthesis, two of which are contested" is correct;
-  "I know a lot about photosynthesis" when confidence is 0.4 is not
-- Stage 3 expression draws on the self-model to qualify its assertions
-  ("I'm fairly confident that X, though I've also read that Y")
+**What was built:** `src/cognition/self_model.py` — `SelfModel`, a callable,
+strictly read-only view over Genesis's knowledge state.
 
-**Cross-layer interaction review:**
-- Reads from RelationGraph (confidence scores, relation counts) — no write risk
-- Reads from memory store (retention evidence) — no write risk
-- Voice layer: Stage 3 expression must be updated to call self_model()
-- No survival-layer interaction (read-only, cheap)
+`brain.self_model(concept)` returns a measured assessment:
+- `relation_count` / `as_subject` / `as_object` — graph coverage
+- `confidence` — mean over *every* edge the concept touches (no floor — the
+  self-model must see the weak edges; that is the point)
+- `contested` / `contested_count` — contradictions Genesis currently holds about it
+- `has_definition` — whether an IS_A edge anchors it taxonomically
+- `prose_count` — retained sentences actually mentioning it (read vs. merely extracted)
+- `inference_count` — conclusions Genesis derived involving it
+- `open_hypotheses` — standing conjectures awaiting evidence
+- `verdict` — honest tier: **unknown / sparse / partial / solid**
 
-**Integration tests required before ✅:**
-1. `self_model(known_concept)` returns confidence > 0.6 and relation_count > 0
-2. `self_model(unknown_concept)` returns confidence = 0 and relation_count = 0
-3. `chat_respond("how well do you know X?")` for a well-known vs. unknown concept
-   returns qualitatively different answers
+Verdict semantics are deliberately conservative: low confidence keeps a concept
+'sparse' no matter how many edges it has (knowing many weak things isn't knowing),
+and a held contradiction caps the verdict at 'partial' regardless of coverage
+(holding conflicting beliefs is not understanding). `overview()` gives the global
+picture; `strongest_concepts()` / `weakest_concepts()` rank by coverage × confidence —
+the weakest list is the honest frontier.
+
+**Wiring:**
+- `voice._say_understanding()`: "how well do you understand X?" answers from
+  measurement in the verdict's register — "Reasonably well… 10 connections, and I'm
+  confident in most of it. Though one of my beliefs about it conflicts…" vs.
+  "Only barely…" vs. "Honestly? Not at all. Want me to go read about it?"
+- Stage 3 `_compose_about()` qualifies fluent expression when the self-model says
+  mean confidence is middling — fluency never outruns measurement
+- No new tables, no writes to any layer — the self-model is a *view*, not more state
+
+**Integration tests (all green):** known concept → confidence > 0.6 ∧ count > 0;
+unknown → honest zeros; known-vs-unknown chat replies qualitatively different;
+contested concept disclosed in conversation; read-only invariant asserted.
+
+**Status:** ✅ — 19 tests in `test_self_model.py`; full suite 1050 passing.
 
 ---
 

@@ -374,6 +374,18 @@ class GenesisVoice:
             reply = self._say_rules()
             return self._log_and_return(reply, set())
 
+        # ── Intent: "how well do you know/understand X?" (M27 self-model) ─
+        # An honest, measured self-assessment — coverage, confidence,
+        # contested beliefs — never performed fluency.
+        _well_m = re.search(
+            r"how\s+(?:well|much|deeply|good)\s+do\s+you\s+(?:really\s+)?"
+            r"(?:know|understand)\s+(?:about\s+)?(.+?)[\s?.!]*$",
+            text, re.I,
+        )
+        if _well_m:
+            reply = self._say_understanding(_well_m.group(1))
+            return self._log_and_return(reply, set())
+
         # ── Intent: introspective / meta questions about Genesis itself ───
         if re.match(
             r"^\s*(can\s+you|are\s+you|do\s+you|have\s+you|will\s+you|"
@@ -1196,6 +1208,97 @@ class GenesisVoice:
 
         return "  ".join(parts)
 
+    def _say_understanding(self, raw_topic: str) -> str:
+        """
+        Honest self-assessment of how well Genesis understands a topic (M27).
+
+        Draws on the self-model: graph coverage, mean confidence, contested
+        beliefs, derived conclusions, open conjectures. The verdict tier
+        shapes the register — 'sparse' never sounds like 'solid'.
+        """
+        sm = getattr(self._brain, "self_model", None)
+        if sm is None:
+            return "I can't gauge my own understanding yet."
+
+        # Resolve the topic to a concept the graph actually holds: try the
+        # full phrase first ("plate tectonics"), then individual content
+        # words, picking the best-covered. If nothing is known, report the
+        # most specific word the user used so the honest "unknown" answer
+        # names the right thing.
+        words = re.findall(r"[a-z]+", raw_topic.lower())
+        content = [w for w in words if len(w) >= 3]
+        candidates = [" ".join(content)] + content if content else []
+        assessment = None
+        for cand in candidates:
+            a = sm.assess(cand)
+            if a["relation_count"] > 0:
+                assessment = a
+                break
+        if assessment is None:
+            topic = candidates[0] if candidates else raw_topic.strip()
+            return (
+                f"Honestly? Not at all. Nothing I've processed connects to "
+                f"{topic} yet — I'd have to go read about it. Want me to?"
+            )
+
+        a = assessment
+        concept = a["concept"]
+        n = a["relation_count"]
+
+        if a["verdict"] == "sparse":
+            return (
+                f"Only barely. I hold {n} connection{'s' if n != 1 else ''} "
+                f"involving {concept}, and I wouldn't lean on "
+                f"{'them' if n != 1 else 'it'} hard — my confidence there "
+                f"is thin."
+            )
+
+        conf = a["confidence"]
+        if conf >= 0.75:
+            conf_phrase = "and I'm confident in most of it"
+        elif conf >= 0.55:
+            conf_phrase = "with moderate confidence"
+        else:
+            conf_phrase = "though much of it is still tentative"
+
+        parts = [
+            f"Reasonably well, I think. I hold {n} connections involving "
+            f"{concept}, {conf_phrase}."
+        ]
+
+        if a["contested_count"]:
+            c = a["contested"][0]
+            verb_a = _REL_VERBS.get(c["rel_type_a"], c["rel_type_a"].lower())
+            verb_b = _REL_VERBS.get(c["rel_type_b"], c["rel_type_b"].lower())
+            obj = self._clean(c["object"]) or "something"
+            n_con = a["contested_count"]
+            conflict_lead = (
+                "one of my beliefs about it conflicts"
+                if n_con == 1
+                else f"{n_con} of my beliefs about it conflict"
+            )
+            parts.append(
+                f"Though I should say — {conflict_lead}. "
+                f"I've read both that it {verb_a} {obj} "
+                f"and that it {verb_b} {obj}, and I haven't settled which."
+            )
+
+        if a["inference_count"]:
+            parts.append(
+                f"I've also worked out {a['inference_count']} conclusion"
+                f"{'s' if a['inference_count'] != 1 else ''} of my own "
+                f"involving it."
+            )
+
+        if a["open_hypotheses"]:
+            parts.append(
+                f"And I'm holding {a['open_hypotheses']} open guess"
+                f"{'es' if a['open_hypotheses'] != 1 else ''} about it "
+                f"I haven't been able to test yet."
+            )
+
+        return " ".join(parts)
+
     def _compose_contradiction(self) -> Optional[str]:
         """Express a known contradiction."""
         conflicts = self._brain.contradictions.query(limit=20)
@@ -1495,6 +1598,26 @@ class GenesisVoice:
                     parts.append(f"I've worked out that {norm} appears to {verb} {obj}.")
             else:
                 parts.append(f"I've worked out that {norm} appears to {verb} {obj}.")
+
+        # M27: fluent expression must not outrun measured confidence. When the
+        # self-model says this concept's mean confidence is middling, say so —
+        # the qualification is part of the answer, not a disclaimer.
+        sm = getattr(self._brain, "self_model", None)
+        if sm is not None and parts:
+            try:
+                a = sm.assess(norm)
+                if 0 < a["confidence"] < 0.55:
+                    parts.append(
+                        "I hold parts of this loosely — my confidence "
+                        "here is still middling."
+                    )
+            except Exception as exc:
+                try:
+                    self._brain.survival.resilience.error_log.log(
+                        "voice.compose_about.self_model", exc
+                    )
+                except Exception:
+                    pass
 
         return " ".join(parts) if parts else None
 

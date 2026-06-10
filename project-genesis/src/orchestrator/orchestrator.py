@@ -170,6 +170,14 @@ class Orchestrator:
         from cognition.inference_programs import InferenceProgramEngine
         self.programs = InferenceProgramEngine(self)
 
+        # M27: Self-model — Genesis knows what it knows. A callable, read-only
+        # view over its own knowledge state: brain.self_model("wolves") returns
+        # coverage, confidence, contested beliefs, and an honest verdict tier
+        # (unknown/sparse/partial/solid). The architectural answer to
+        # Dunning-Kruger: something now represents "I don't know this."
+        from cognition.self_model import SelfModel
+        self.self_model = SelfModel(self)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
