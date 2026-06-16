@@ -99,12 +99,27 @@ def test_add_duplicate_takes_max_confidence():
     assert rows[0]["confidence"] >= 0.9
 
 
-def test_add_duplicate_does_not_lower_confidence():
+def test_add_duplicate_does_not_lower_confidence_at_low_plasticity():
+    # At low plasticity (<0.3), contradicting evidence is fully rejected — pure MAX.
     g = _graph()
+    g.set_plasticity(0.05)
     g.add("wolves", "CONTROLS", "deer", 0.9)
     g.add("wolves", "CONTROLS", "deer", 0.3)
     rows = g.query_subject("wolves")
     assert rows[0]["confidence"] >= 0.9
+
+
+def test_add_duplicate_high_plasticity_allows_reduction():
+    # At high plasticity, contradicting evidence can reduce confidence (M33).
+    # The floor prevents a single input from destroying a belief entirely.
+    g = _graph()
+    g.set_plasticity(0.95)
+    g.add("wolves", "CONTROLS", "deer", 0.9)
+    g.add("wolves", "CONTROLS", "deer", 0.3)
+    rows = g.query_subject("wolves")
+    conf = rows[0]["confidence"]
+    assert conf < 0.9,            "high plasticity should allow reduction"
+    assert conf >= 0.9 * 0.7 - 0.01, "floor should prevent extreme drop"
 
 
 def test_add_normalises_case():

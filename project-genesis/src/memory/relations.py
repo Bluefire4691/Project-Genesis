@@ -52,6 +52,7 @@ class RelationGraph:
 
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
+        self._plasticity: float = 0.5   # set each cycle by MetaplasticityEngine
         self._init_schema()
 
     # ------------------------------------------------------------------
@@ -87,6 +88,14 @@ class RelationGraph:
     # Write
     # ------------------------------------------------------------------
 
+    def set_plasticity(self, plasticity: float) -> None:
+        """
+        Set the current plasticity level (0.0–1.0), called each cycle by
+        MetaplasticityEngine. Controls how readily contradicting evidence can
+        reduce an established belief's confidence.
+        """
+        self._plasticity = max(0.0, min(1.0, float(plasticity)))
+
     def add(
         self,
         subject: str,
@@ -99,9 +108,20 @@ class RelationGraph:
         """
         Record a typed relation.
 
-        Subject and object are normalised to lowercase. If the triple already
-        exists, confidence is updated to MAX(existing, new) — relations only
-        become more certain, never less.
+        Subject and object are normalised to lowercase.
+
+        Confidence accumulation is plasticity-aware (M33):
+          - New evidence that strengthens a belief always applies (MAX behaviour).
+          - Contradicting evidence (new < existing) is gated by plasticity:
+              plasticity < 0.30  → pure MAX (protect solid knowledge)
+              plasticity ≥ 0.30  → blend toward new value, max 40% of the gap,
+                                    never below 70% of existing confidence.
+          This means a single contradicting input cannot destroy a belief, but
+          under high plasticity (error spiking / stuck) the graph can genuinely
+          update when the world has changed.
+
+        Genesis never discards data — the relation always exists; plasticity
+        only affects how much its confidence moves.
 
         Returns True on success, False on failure (never raises).
         """
@@ -109,23 +129,48 @@ class RelationGraph:
             return False
 
         subject = _normalise(subject)
-        obj = _normalise(obj)
+        obj     = _normalise(obj)
         if not subject or not obj or subject == obj:
             return False
 
+        confidence = max(0.0, min(1.0, confidence))
+
         try:
-            self._conn.execute("""
-                INSERT INTO relations
-                    (subject, rel_type, object, confidence, source_key, session_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(subject, rel_type, object) DO UPDATE SET
-                    confidence = MAX(confidence, excluded.confidence),
-                    source_key = excluded.source_key
-            """, (
-                subject, rel_type, obj,
-                max(0.0, min(1.0, confidence)),
-                source_key, session_id, time.time(),
-            ))
+            plasticity = self._plasticity
+
+            if plasticity < 0.30:
+                # Rigid regime — pure MAX, protect established confidence.
+                self._conn.execute("""
+                    INSERT INTO relations
+                        (subject, rel_type, object, confidence, source_key, session_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(subject, rel_type, object) DO UPDATE SET
+                        confidence = MAX(confidence, excluded.confidence),
+                        source_key = excluded.source_key
+                """, (subject, rel_type, obj, confidence,
+                      source_key, session_id, time.time()))
+            else:
+                # Plastic regime — contradicting evidence can reduce confidence.
+                # reduction_factor ∈ [0, 0.4]: how much of the gap to close.
+                reduction = min(0.4, (plasticity - 0.30) / 0.70 * 0.40)
+                self._conn.execute("""
+                    INSERT INTO relations
+                        (subject, rel_type, object, confidence, source_key, session_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(subject, rel_type, object) DO UPDATE SET
+                        confidence = CASE
+                            WHEN excluded.confidence >= confidence
+                            THEN excluded.confidence
+                            ELSE MAX(
+                                confidence + (excluded.confidence - confidence) * ?,
+                                confidence * 0.70
+                            )
+                        END,
+                        source_key = excluded.source_key
+                """, (subject, rel_type, obj, confidence,
+                      source_key, session_id, time.time(),
+                      reduction))
+
             self._conn.commit()
             return True
         except Exception:

@@ -140,7 +140,8 @@ duplication; the roadmap is the authoritative source of truth for project state.
 | M30 | ✅ | Hypothesis engine: Genesis authors falsifiable predictions (analogy/contradiction/chain), tests them against later evidence, owns its hits and misses — its first generative organ |
 | M30.2 | ✅ | Research proposal: Genesis composes a first-person research direction (what it understands / can't explain / predicts / will read) from its own state — an authored artifact, not retrieved text |
 | M31 | ✅ | Inference programs: Genesis mines its own graph for recurrent chain patterns, authors declarative if-then rules empirically (no hard-coded logic), executes them to derive new edges, tracks hit rate — accumulated individuality expressed as program logic |
-| M32 | ✅ | LLM expression layer: Claude API as Genesis's mouth, not its mind. Knowledge stays in the graph; the LLM turns internal state (drives, self-model, salient concepts, reflection) into fluent speech. Genesis has 4 tools (understand/recall/browse/drives) and runs an agentic loop before answering. Falls back to template voice if API key absent. |
+| M32 | ✅ | LLM expression layer: local edge model (Ollama/OpenAI-compatible) as Genesis's mouth. Knowledge stays in the graph; the model turns internal state (drives, self-model, salient concepts, reflection) into fluent speech. Falls back to template voice if server unreachable. |
+| M33 | ✅ | Metaplasticity: adaptive learning rate from prediction-error history. Plasticity rises when Genesis is stuck or surprised (receptive to change), falls when knowledge is stable (protecting solid beliefs). The relation graph's confidence accumulation is plasticity-gated — contradicting evidence can reduce confidence under high plasticity, but with a 70% floor per update. Persisted across sessions. |
 
 ---
 

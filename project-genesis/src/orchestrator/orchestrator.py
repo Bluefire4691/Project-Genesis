@@ -221,6 +221,14 @@ class Orchestrator:
         self.drives = DriveSystem(_conn)
         self.drives.restore()
 
+        # M33: Metaplasticity — adaptive learning rate from prediction-error history.
+        # The learning rate is not fixed: it rises when Genesis is stuck or surprised
+        # (making it receptive to change) and falls when knowledge is stable (protecting
+        # solid beliefs). Propagates to relations.set_plasticity() each cycle.
+        from cognition.metaplasticity import MetaplasticityEngine
+        self.metaplasticity = MetaplasticityEngine(self)
+        self.metaplasticity.restore()
+
         # Tracks the cycle at which reflection was last triggered by drives
         # so reflect_sooner fires at most once per 20 cycles, not every cycle.
         self._last_reflect_cycle: int = 0
@@ -359,6 +367,14 @@ class Orchestrator:
         # Computed before storing so it reflects the pre-update knowledge state.
         # High error = Genesis has little/low-confidence knowledge about these concepts.
         pred_error = self.relations.prediction_error(synthesis.context_terms)
+
+        # M33: Update metaplasticity from this cycle's error signal.
+        # Propagates the new plasticity to relations.set_plasticity() so all
+        # subsequent add() calls this cycle use the correct learning rate.
+        try:
+            self.metaplasticity.update(pred_error)
+        except Exception as exc:
+            self.survival.resilience.error_log.log("metaplasticity.update", exc)
 
         # M17: Update curiosity directives before storing (uses pre-update graph state)
         self._update_curiosity_directives(synthesis.context_terms, pred_error)
@@ -883,6 +899,10 @@ class Orchestrator:
     def save_session(self) -> None:
         """Checkpoint current state to the DB for restore on next startup."""
         self._session_manager.save(self)
+        try:
+            self.metaplasticity.save()
+        except Exception as exc:
+            self.survival.resilience.error_log.log("metaplasticity.save", exc)
         if self.verbose:
             self._log(f"💾 Session saved (cycle={self.cycle_count})")
 
