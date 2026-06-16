@@ -327,6 +327,26 @@ class GenesisVoice:
         # Log the user turn before routing
         self._log_turn("user", user_text, set(concepts))
 
+        # ── M32: LLM expression layer ─────────────────────────────────────
+        # When an LLM voice is wired in, delegate conversational responses to
+        # it. The LLM receives Genesis's internal state as grounding context and
+        # has tool access to inspect the graph, search memory, and browse.
+        # Falls back to the template voice below on any failure.
+        voice_llm = getattr(self._brain, "voice_llm", None)
+        if voice_llm is not None:
+            try:
+                reply = voice_llm.respond(user_text, list(self._conversation))
+                if reply:
+                    return self._log_and_return(reply, set(concepts))
+            except Exception as exc:
+                try:
+                    self._brain.survival.resilience.error_log.log(
+                        "voice_llm.respond", exc
+                    )
+                except Exception:
+                    pass
+                # fall through to template voice
+
         # ── Intent: brief acknowledgements / pushback ─────────────────────
         # "ok", "i didn't ask", "stop" etc — acknowledge without repeating.
         if re.match(

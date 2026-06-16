@@ -119,7 +119,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 
 ---
 
-## Current Milestone: M27 complete — next: M28 (Deliberative Integration)
+## Current Milestone: M32 complete — next: M28 (Deliberative Integration)
 
 **Full milestone history is in `ROADMAP.md`.** This table is kept brief here to avoid
 duplication; the roadmap is the authoritative source of truth for project state.
@@ -140,6 +140,7 @@ duplication; the roadmap is the authoritative source of truth for project state.
 | M30 | ✅ | Hypothesis engine: Genesis authors falsifiable predictions (analogy/contradiction/chain), tests them against later evidence, owns its hits and misses — its first generative organ |
 | M30.2 | ✅ | Research proposal: Genesis composes a first-person research direction (what it understands / can't explain / predicts / will read) from its own state — an authored artifact, not retrieved text |
 | M31 | ✅ | Inference programs: Genesis mines its own graph for recurrent chain patterns, authors declarative if-then rules empirically (no hard-coded logic), executes them to derive new edges, tracks hit rate — accumulated individuality expressed as program logic |
+| M32 | ✅ | LLM expression layer: Claude API as Genesis's mouth, not its mind. Knowledge stays in the graph; the LLM turns internal state (drives, self-model, salient concepts, reflection) into fluent speech. Genesis has 4 tools (understand/recall/browse/drives) and runs an agentic loop before answering. Falls back to template voice if API key absent. |
 
 ---
 
@@ -183,8 +184,10 @@ duplication; the roadmap is the authoritative source of truth for project state.
 
 - Don't add error handling for scenarios that can't happen. Trust the survival layer.
 - Don't remove or bypass lower layers to make higher-layer code simpler.
-- Don't add LLM API calls. Genesis builds its knowledge from processed input, not from
-  querying external models.
+- Don't use LLM API calls to build knowledge. Genesis accumulates knowledge from
+  processed input — the Claude API is used only as an expression layer (M32 voice),
+  conditioned strictly on Genesis's own internal state. It cannot add facts Genesis
+  doesn't hold.
 - Don't benchmark against GPT/Claude/etc. That's not the competition.
 - Don't add a 2D embodiment layer without revisiting the architecture amendment
   (Section 3 of `docs/architecture_amendment_v0.2.md` — declined with reasoning).

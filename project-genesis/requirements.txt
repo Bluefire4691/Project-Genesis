@@ -14,6 +14,9 @@
 #   Or Genesis auto-downloads on first lookup if internet is available.
 nltk>=3.8
 
+# LLM expression layer (M32) — Genesis's voice, grounded in its internal state
+anthropic>=0.100.0
+
 # Development / testing:
 pytest>=7.0
 
