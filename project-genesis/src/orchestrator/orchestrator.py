@@ -200,13 +200,12 @@ class Orchestrator:
         # M13: Voice output — speaks from internal state, not from LLM
         self.voice = GenesisVoice(self, channel=channel or TextChannel())
 
-        # M32: LLM expression layer — the Claude API as Genesis's mouth.
-        # Knowledge still comes from the graph; this turns it into fluent speech.
-        # Disabled if ANTHROPIC_API_KEY is not set (falls back to template voice).
+        # M32: Local LLM expression layer — a small edge model as Genesis's mouth.
+        # Knowledge stays in the graph; the model turns internal state into speech.
+        # Always instantiated; respond() returns "" if no local server is running,
+        # and chat_respond falls back to the template voice silently.
         from output.voice_llm import GenesisVoiceLLM
-        self.voice_llm: "GenesisVoiceLLM | None" = (
-            GenesisVoiceLLM(self) if os.environ.get("ANTHROPIC_API_KEY") else None
-        )
+        self.voice_llm = GenesisVoiceLLM(self)
 
         # M17: Active curiosity directives — concepts Genesis is actively trying
         # to resolve (SOAR-style impasse→subgoal). Persisted across sessions.

@@ -335,7 +335,9 @@ class GenesisVoice:
         voice_llm = getattr(self._brain, "voice_llm", None)
         if voice_llm is not None:
             try:
-                reply = voice_llm.respond(user_text, list(self._conversation))
+                # Pass prior turns only — the current user message is separate.
+                # _conversation already has the user turn logged above, so slice it off.
+                reply = voice_llm.respond(user_text, list(self._conversation[:-1]))
                 if reply:
                     return self._log_and_return(reply, set(concepts))
             except Exception as exc:

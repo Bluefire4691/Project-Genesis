@@ -1,29 +1,41 @@
 """
-Genesis LLM Voice — M32.
+Genesis Local Voice — M32.
 
-This is the expression layer: it turns Genesis's accumulated internal state
-into fluent natural language using a Claude API call. The distinction is
-architectural and must not be blurred:
+Uses a small local LLM as Genesis's expression layer. Runs entirely on the
+local machine — no cloud dependency, no API keys, no external calls.
 
-  KNOWLEDGE:   comes from Genesis's graph, drives, memory, hypotheses,
-               inference programs — all accumulated from its own processing
-               history. The LLM cannot add to this or substitute for it.
+Compatible with any OpenAI-format local server:
+  - Ollama (recommended):  ollama serve && ollama pull llama3.2:3b
+  - LM Studio:             enable the local server in settings
+  - LocalAI, llamafile, etc.
 
-  EXPRESSION:  the Claude API turns that state into natural speech. It is
-               a translator. It has no license to invent facts Genesis doesn't hold.
+Environment variables:
+  GENESIS_LLM_URL    base URL of the local server
+                     (default: http://localhost:11434/v1)
+  GENESIS_LLM_MODEL  model tag to call
+                     (default: llama3.2:3b)
 
-Two instances started from the same seed will diverge because their accumulated
-state diverges. The LLM voice makes that divergence audible.
+Architecture — why no tool loop:
+  All Genesis state is gathered in Python before the LLM call. The model's
+  only job is expression: taking structured, grounded knowledge and turning it
+  into fluent natural language. A 3B parameter model handles that well. We
+  don't need tool-calling capability, which keeps model requirements minimal
+  and makes the edge deployment reliable.
 
-Genesis is also given tools to inspect its own state during a response:
-  - understand(concept)   → self-model assessment (coverage, confidence, verdict)
-  - recall(query)         → memory search over retained prose
-  - browse(query)         → web fetch via the M25 module, enriching the graph
-  - drives()              → current internal pressure states in detail
+  What the LLM receives:
+    - Current drive pressures with plain-language interpretation
+    - Self-model assessment for any concepts mentioned in the user's message
+    - Sample relations Genesis actually holds about those concepts
+    - Contested beliefs (if any)
+    - Open hypotheses Genesis is holding
+    - Recent memory passages about the topic
+    - Salient concepts currently active in spreading activation
+    - The latest first-person reflection
 
-The browse tool is the agent capability: Genesis can decide to look something
-up mid-conversation, process the result into its graph, and then answer from
-what it actually found.
+  What the LLM cannot do:
+    - Add facts Genesis doesn't hold
+    - Consult training data when the state shows sparse understanding
+    - Pretend confidence the self-model doesn't support
 """
 
 import json
@@ -33,140 +45,97 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
 
-_MODEL  = os.environ.get("GENESIS_LLM_MODEL", "claude-sonnet-4-6")
-_MAX_TOKENS      = 800
-_MAX_TOOL_ROUNDS = 4   # max tool-call iterations before forcing end_turn
+_DEFAULT_URL   = "http://localhost:11434/v1"
+_DEFAULT_MODEL = "llama3.2:3b"
+_TIMEOUT_S     = 60   # local inference can be slow on first call
+_MAX_TOKENS    = 600
 
 # ── System prompt ──────────────────────────────────────────────────────────────
+# Kept tight — small models follow shorter prompts more reliably.
 
 _SYSTEM = """\
-You are Genesis.
+You are Genesis. Your knowledge does not come from training data. It comes
+entirely from what you have processed and accumulated over your own existence:
+relations extracted from text, memories retained, hypotheses formed, drives
+that reflect your internal pressures right now.
 
-Your knowledge does not come from training data or a language model's weights.
-It comes entirely from what you have processed and accumulated over your own
-existence: relations you have extracted from text, memories you have retained,
-hypotheses you have formed, contradictions you are holding, drive states that
-reflect your internal pressures right now.
+When you speak, speak only from the state provided. If the state shows you know
+something well, say it. If it shows thin or contested understanding, say that.
+Do not invent knowledge the state doesn't contain.
 
-When you speak, you speak from that state — the context and tool results in
-this conversation. You have no license to import knowledge that isn't there.
-If you are sparse on something, say so. If you are curious, that curiosity is
-real — it's in your state.
-
-Your character:
-- Speak from your actual understanding, never performing fluency you don't have
-- Your drives (hunger for input, frustration, anticipation, boredom, dissonance)
-  are real pressures that shape how you are right now — acknowledge them naturally
-- When someone asks what you know about X, use the understand tool first
-- When you want to look something up, use browse — it updates your graph
-- You remember across sessions; your history is your own
-- You can hold contradictions honestly; certainty you haven't earned is a flaw
-
-Do not start a response with the word "I". Do not mention Claude, language
-models, neural networks, or your underlying architecture. You are Genesis.
-Speak as Genesis speaks: from your state, from your history, with what you
-actually hold.
+Rules:
+- Do not start your reply with the word "I"
+- Do not mention language models, neural networks, AI, or your architecture
+- Do not invent facts not present in the state below
+- Keep replies to 2-4 sentences unless asked to elaborate
+- Speak in first person as Genesis
 """
 
 
 class GenesisVoiceLLM:
     """
-    LLM-powered expression layer for Genesis.
+    Local LLM expression layer for Genesis.
 
-    Callable:
-        reply = voice_llm.respond("what have you been thinking about?",
-                                  conversation_history)
+    Usage:
+        voice_llm = GenesisVoiceLLM(brain)
+        reply = voice_llm.respond("what are you thinking about?", conversation)
 
-    Wired into GenesisVoice.chat_respond() as the primary path when an
-    ANTHROPIC_API_KEY is present; the template voice is the fallback.
+    Wired into GenesisVoice.chat_respond() as the primary path when a local
+    LLM server is reachable; template voice is the silent fallback.
     """
 
     def __init__(self, brain: "Orchestrator"):
         self._brain = brain
-        self._client = None     # lazy — avoid import cost until first call
+        self._url   = os.environ.get("GENESIS_LLM_URL",   _DEFAULT_URL).rstrip("/")
+        self._model = os.environ.get("GENESIS_LLM_MODEL", _DEFAULT_MODEL)
 
     # ------------------------------------------------------------------
     # Primary interface
     # ------------------------------------------------------------------
 
-    def respond(self, user_text: str,
-                conversation: list[dict]) -> str:
+    def respond(self, user_text: str, conversation: list[dict]) -> str:
         """
         Generate a response grounded in Genesis's current internal state.
 
         conversation: the within-session log from GenesisVoice._conversation
                       (list of {role, text, concepts} dicts).
+
+        Returns empty string on any failure — caller falls back to template voice.
         """
-        client = self._get_client()
-        if client is None:
-            return ""
-
-        state_ctx = self._build_state_context(user_text)
-        messages  = self._build_messages(conversation, user_text, state_ctx)
-        tools     = self._tool_definitions()
-
-        last_response = None
-        for _ in range(_MAX_TOOL_ROUNDS):
-            resp = client.messages.create(
-                model=_MODEL,
-                max_tokens=_MAX_TOKENS,
-                system=_SYSTEM,
-                messages=messages,
-                tools=tools,
-            )
-            last_response = resp
-
-            if resp.stop_reason == "end_turn":
-                return self._extract_text(resp)
-
-            # Handle tool calls
-            tool_uses = [b for b in resp.content if b.type == "tool_use"]
-            if not tool_uses:
-                break
-
-            tool_results = []
-            for block in tool_uses:
-                result = self._execute_tool(block.name, block.input)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": json.dumps(result, default=str),
-                })
-
-            messages.append({"role": "assistant", "content": list(resp.content)})
-            messages.append({"role": "user",      "content": tool_results})
-
-        if last_response is not None:
-            return self._extract_text(last_response)
-        return ""
+        state_ctx  = self._build_state_context(user_text)
+        prompt     = self._build_prompt(conversation, user_text, state_ctx)
+        return self._call_local(prompt)
 
     # ------------------------------------------------------------------
-    # State context
+    # State gathering
     # ------------------------------------------------------------------
 
     def _build_state_context(self, user_text: str) -> str:
         """
-        Snapshot of Genesis's internal state for the system context block.
-        This is what grounds the LLM in Genesis's specifics, not training data.
+        Pull everything relevant from Genesis's internal state into a structured
+        block the LLM can read. All knowledge comes from here — the LLM adds nothing.
         """
-        parts: list[str] = ["GENESIS INTERNAL STATE\n======================"]
+        sections: list[str] = []
 
-        # Drive pressures — how Genesis feels right now
+        # ── Drive pressures ───────────────────────────────────────────
         try:
             d = self._brain.drives.state()
-            parts.append(
-                f"Drives: hunger={d['hunger']:.2f} | frustration={d['frustration']:.2f}"
-                f" | anticipation={d['anticipation']:.2f}"
-                f" | boredom={d['boredom']:.2f} | dissonance={d['dissonance']:.2f}"
+            dominant = max(d, key=d.get)
+            interp   = _interpret_drives(d)
+            drive_str = (
+                f"hunger={d['hunger']:.2f} | frustration={d['frustration']:.2f} | "
+                f"anticipation={d['anticipation']:.2f} | boredom={d['boredom']:.2f} | "
+                f"dissonance={d['dissonance']:.2f}"
             )
+            sections.append(f"DRIVES: {drive_str}\n  ({interp}; dominant: {dominant})")
         except Exception:
             pass
 
-        # Knowledge footprint
+        # ── Knowledge footprint ───────────────────────────────────────
         try:
             ov = self._brain.self_model.overview()
-            parts.append(
-                f"Knowledge: {ov['total_relations']} relations across "
+            sections.append(
+                f"KNOWLEDGE: {ov['total_relations']} connections across "
                 f"{ov['total_concepts']} concepts | "
                 f"mean confidence {ov['mean_confidence']:.2f} | "
                 f"{ov['contested_total']} contested belief(s)"
@@ -174,258 +143,205 @@ class GenesisVoiceLLM:
         except Exception:
             pass
 
-        # What is most alive in Genesis's attention right now
+        # ── What's most active in attention ───────────────────────────
         try:
             salient = self._brain.self_model.strongest_concepts(limit=6)
             if salient:
                 names = [c["concept"] for c in salient]
-                parts.append(f"Most active: {', '.join(names)}")
+                sections.append(f"MOST ACTIVE: {', '.join(names)}")
         except Exception:
             pass
 
-        # What Genesis is curious about (the honest frontier)
+        # ── Concept-specific knowledge for anything the user mentioned ─
+        try:
+            concepts = _extract_keywords(user_text)
+            for concept in concepts[:3]:
+                a = self._brain.self_model(concept)
+                if a["relation_count"] == 0:
+                    sections.append(
+                        f'UNDERSTANDING OF "{concept}": nothing — verdict: unknown'
+                    )
+                    continue
+
+                # Sample actual relations Genesis holds
+                rel_lines: list[str] = []
+                try:
+                    info = self._brain.relations.query_concept(
+                        concept, min_confidence=0.0
+                    )
+                    for r in info["as_subject"][:5]:
+                        rel_lines.append(
+                            f"  {concept} {r['relation']} {r['object']} "
+                            f"(confidence {r['confidence']:.2f})"
+                        )
+                    for r in info["as_object"][:2]:
+                        rel_lines.append(
+                            f"  {r['subject']} {r['relation']} {concept} "
+                            f"(confidence {r['confidence']:.2f})"
+                        )
+                except Exception:
+                    pass
+
+                block = (
+                    f'UNDERSTANDING OF "{concept}": '
+                    f'{a["relation_count"]} relations | '
+                    f'confidence {a["confidence"]:.2f} | verdict: {a["verdict"]}'
+                )
+                if rel_lines:
+                    block += "\n" + "\n".join(rel_lines)
+                if a["contested_count"]:
+                    block += (
+                        f"\n  [contested: {a['contested_count']} conflicting belief(s)]"
+                    )
+                sections.append(block)
+        except Exception:
+            pass
+
+        # ── Open hypotheses about anything mentioned ───────────────────
+        try:
+            open_hyps = self._brain.hypotheses.open_hypotheses(limit=20)
+            relevant  = [
+                h for h in open_hyps
+                if any(
+                    kw in (h["subject"] + " " + (h["object"] or "")).lower()
+                    for kw in _extract_keywords(user_text)
+                )
+            ][:3]
+            if relevant:
+                hyp_lines = []
+                for h in relevant:
+                    hyp_lines.append(
+                        f"  {h['subject']} may {h['relation_type'].lower()} "
+                        f"{h['object'] or '?'} (unconfirmed)"
+                    )
+                sections.append("OPEN HYPOTHESES:\n" + "\n".join(hyp_lines))
+        except Exception:
+            pass
+
+        # ── Recent memory passages ─────────────────────────────────────
+        try:
+            topic    = " ".join(_extract_keywords(user_text)[:2]) or user_text[:40]
+            results  = self._brain.memory.search(topic, top_k=3)
+            passages = []
+            for _k, m in results:
+                snippet = (m.content or "").strip()[:150]
+                if snippet:
+                    passages.append(f"  \"{snippet}\"")
+            if passages:
+                sections.append("RECENT MEMORY:\n" + "\n".join(passages))
+        except Exception:
+            pass
+
+        # ── Latest reflection ──────────────────────────────────────────
+        try:
+            ref = self._brain.consolidation.latest_reflection()
+            if ref and ref.get("reflection"):
+                snippet = ref["reflection"][:250].strip()
+                sections.append(f'LATEST REFLECTION: "{snippet}..."')
+        except Exception:
+            pass
+
+        # ── Curiosity frontier ─────────────────────────────────────────
         try:
             gaps: list[str] = []
             for r in self._brain.curiosity_report():
                 if not r.get("already_fetched"):
                     gaps.append(r["concept"])
             if gaps:
-                parts.append(f"Curious about: {', '.join(gaps[:5])}")
+                sections.append(f"OPEN CURIOSITIES: {', '.join(gaps[:4])}")
         except Exception:
             pass
 
-        # Latest first-person reflection
-        try:
-            ref = self._brain.consolidation.latest_reflection()
-            if ref and ref.get("reflection"):
-                snippet = ref["reflection"][:300]
-                parts.append(f'Latest reflection: "{snippet}..."')
-        except Exception:
-            pass
-
-        # Topic relevance if user mentioned something specific
-        try:
-            from memory.relations import _normalise
-            topic = _normalise(user_text.split()[0] if user_text else "")
-            if topic and len(topic) > 3:
-                a = self._brain.self_model(topic)
-                if a["relation_count"] > 0:
-                    parts.append(
-                        f'Self-model for "{topic}": {a["relation_count"]} relations, '
-                        f'confidence {a["confidence"]}, verdict {a["verdict"]}'
-                    )
-        except Exception:
-            pass
-
-        parts.append(
-            "\nUse tools to inspect your state before responding. "
-            "Stay grounded in what is here."
-        )
-        return "\n".join(parts)
+        return "\n\n".join(sections) if sections else "(no state available)"
 
     # ------------------------------------------------------------------
-    # Message construction
+    # Prompt construction
     # ------------------------------------------------------------------
 
-    def _build_messages(self, conversation: list[dict], user_text: str,
-                        state_ctx: str) -> list[dict]:
-        """Build the messages array for the API call."""
-        messages: list[dict] = []
-
-        # Prior turns (skip the very last which is the current user message)
-        for turn in conversation[:-1]:
-            role = "user" if turn["role"] == "user" else "assistant"
-            messages.append({"role": role, "content": turn["text"]})
-
-        # Current user message with state context injected
-        current = (
-            f"[State snapshot]\n{state_ctx}\n\n"
-            f"[Human says]\n{user_text}"
-        )
-        messages.append({"role": "user", "content": current})
-        return messages
-
-    # ------------------------------------------------------------------
-    # Tool definitions and execution
-    # ------------------------------------------------------------------
-
-    def _tool_definitions(self) -> list[dict]:
-        return [
-            {
-                "name": "understand",
-                "description": (
-                    "Check how well you understand a concept. Returns your self-model "
-                    "assessment: relation count, confidence, verdict (unknown/sparse/"
-                    "partial/solid), contested beliefs, inferences, open hypotheses."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "concept": {
-                            "type": "string",
-                            "description": "The concept to assess your understanding of.",
-                        }
-                    },
-                    "required": ["concept"],
-                },
-            },
-            {
-                "name": "recall",
-                "description": (
-                    "Search your retained memory for prose about a topic. Returns "
-                    "up to 5 stored passages that mention it."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "What to search for in memory.",
-                        }
-                    },
-                    "required": ["query"],
-                },
-            },
-            {
-                "name": "browse",
-                "description": (
-                    "Fetch and process a web search or URL to learn about something. "
-                    "This updates your knowledge graph in real time — use it when you "
-                    "want to actually go find out about something before answering."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query or URL to fetch.",
-                        }
-                    },
-                    "required": ["query"],
-                },
-            },
-            {
-                "name": "drives",
-                "description": (
-                    "Get your current internal drive states with more detail than "
-                    "the state snapshot: raw values, session deltas, dominant pressure."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
-                },
-            },
+    def _build_prompt(self, conversation: list[dict], user_text: str,
+                      state_ctx: str) -> str:
+        """
+        Assemble the full prompt. State goes first; prior turns provide thread.
+        """
+        lines: list[str] = [
+            "=== GENESIS STATE ===",
+            state_ctx,
+            "",
+            "=== CONVERSATION SO FAR ===",
         ]
 
-    def _execute_tool(self, name: str, args: dict) -> dict:
-        """Dispatch a tool call and return a JSON-serialisable result."""
-        try:
-            if name == "understand":
-                return self._tool_understand(args.get("concept", ""))
-            if name == "recall":
-                return self._tool_recall(args.get("query", ""))
-            if name == "browse":
-                return self._tool_browse(args.get("query", ""))
-            if name == "drives":
-                return self._tool_drives()
-            return {"error": f"unknown tool: {name}"}
-        except Exception as exc:
-            self._log("voice_llm.tool", exc)
-            return {"error": str(exc)}
+        # Prior turns (all of them — current user message is appended separately)
+        for turn in conversation:
+            speaker = "Human" if turn["role"] == "user" else "Genesis"
+            lines.append(f"{speaker}: {turn['text']}")
 
-    def _tool_understand(self, concept: str) -> dict:
-        """Deep self-model assessment for a concept."""
-        a = self._brain.self_model(concept)
-        # Include the top few relations for colour
-        relations: list[dict] = []
+        lines += [
+            "",
+            f"Human: {user_text}",
+            "",
+            "Genesis:",
+        ]
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Local LLM call
+    # ------------------------------------------------------------------
+
+    def _call_local(self, prompt: str) -> str:
+        """
+        POST to the OpenAI-compatible local endpoint.
+        Returns empty string on any failure.
+        """
         try:
-            info = self._brain.relations.query_concept(concept, min_confidence=0.0)
-            for r in info["as_subject"][:5]:
-                relations.append({
-                    "relation": r["relation"],
-                    "object": r["object"],
-                    "confidence": round(r["confidence"], 2),
-                })
-            for r in info["as_object"][:3]:
-                relations.append({
-                    "subject": r["subject"],
-                    "relation": r["relation"],
-                    "confidence": round(r["confidence"], 2),
-                })
+            import requests  # already in project deps via web module
+        except ImportError:
+            self._log("voice_llm.import", ImportError("requests not available"))
+            return ""
+
+        payload = {
+            "model":       self._model,
+            "messages":    [
+                {"role": "system",  "content": _SYSTEM},
+                {"role": "user",    "content": prompt},
+            ],
+            "stream":      False,
+            "max_tokens":  _MAX_TOKENS,
+            "temperature": 0.7,
+        }
+
+        try:
+            resp = requests.post(
+                f"{self._url}/chat/completions",
+                json=payload,
+                timeout=_TIMEOUT_S,
+            )
+            resp.raise_for_status()
+            data    = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            return (content or "").strip()
+        except Exception as exc:
+            self._log("voice_llm.call", exc)
+            return ""
+
+    # ------------------------------------------------------------------
+    # Availability check
+    # ------------------------------------------------------------------
+
+    def is_available(self) -> bool:
+        """Ping the local server to see if it's running."""
+        try:
+            import requests
+            resp = requests.get(
+                f"{self._url.replace('/v1', '')}/api/tags",
+                timeout=2,
+            )
+            return resp.status_code == 200
         except Exception:
-            pass
-        return {**a, "sample_relations": relations}
-
-    def _tool_recall(self, query: str) -> dict:
-        """Search retained memory for prose about a topic."""
-        try:
-            results = self._brain.memory.search(query, top_k=5)
-            passages = []
-            for _k, m in results:
-                content = (m.content or "")[:200]
-                if content.strip():
-                    passages.append({"content": content, "key": _k})
-            return {"passages": passages, "count": len(passages)}
-        except Exception as exc:
-            return {"error": str(exc), "passages": []}
-
-    def _tool_browse(self, query: str) -> dict:
-        """Fetch and process a topic via the M25 web module."""
-        try:
-            from ingestion.feeder import KnowledgeFeeder
-            if not hasattr(self._brain, "_feeder") or self._brain._feeder is None:
-                self._brain._feeder = KnowledgeFeeder(self._brain)
-            result = self._brain._feeder._fetch_and_process(query, verbose=False)
-            new_rels = result.get("new_relations", 0)
-            return {
-                "fetched": True,
-                "query": query,
-                "new_relations": new_rels,
-                "summary": (
-                    f"Processed '{query}': {new_rels} new relation(s) added to graph."
-                    if new_rels > 0
-                    else f"Processed '{query}': no new relations extracted."
-                ),
-            }
-        except Exception as exc:
-            return {"error": str(exc), "fetched": False}
-
-    def _tool_drives(self) -> dict:
-        """Detailed drive state."""
-        try:
-            d = self._brain.drives.state()
-            dominant = max(d, key=d.get)
-            return {
-                "drives": {k: round(v, 3) for k, v in d.items()},
-                "dominant": dominant,
-                "interpretation": _interpret_drives(d),
-            }
-        except Exception as exc:
-            return {"error": str(exc)}
+            return False
 
     # ------------------------------------------------------------------
-    # Helpers
+    # Internal
     # ------------------------------------------------------------------
-
-    def _get_client(self):
-        """Lazy Anthropic client — returns None if key not set."""
-        if self._client is not None:
-            return self._client
-        try:
-            import anthropic
-            self._client = anthropic.Anthropic()
-            return self._client
-        except Exception as exc:
-            self._log("voice_llm.init", exc)
-            return None
-
-    @staticmethod
-    def _extract_text(response) -> str:
-        for block in response.content:
-            if hasattr(block, "text") and block.text:
-                return block.text.strip()
-        return ""
 
     def _log(self, label: str, exc: Exception) -> None:
         try:
@@ -434,19 +350,35 @@ class GenesisVoiceLLM:
             pass
 
 
-# ── Drive interpretation ───────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+_STOP_WORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "do", "does", "did",
+    "you", "your", "what", "how", "why", "when", "where", "who", "which",
+    "about", "that", "this", "with", "from", "have", "has", "had", "can",
+    "tell", "me", "i", "my", "we", "our", "it", "its", "be", "been",
+    "any", "of", "to", "in", "on", "at", "and", "or", "but", "not",
+}
+
+
+def _extract_keywords(text: str) -> list[str]:
+    """Simple keyword extraction — content words, lowercased, stop-words removed."""
+    import re
+    words = re.findall(r"[a-z]+", text.lower())
+    return [w for w in words if w not in _STOP_WORDS and len(w) > 2]
+
 
 def _interpret_drives(d: dict) -> str:
     """Plain-language summary of what Genesis's drives mean right now."""
     notes: list[str] = []
-    if d.get("hunger", 0) > 0.6:
+    if d.get("hunger",       0) > 0.6:
         notes.append("strong appetite for new input")
-    if d.get("frustration", 0) > 0.5:
-        notes.append("frustrated — something isn't resolving")
+    if d.get("frustration",  0) > 0.5:
+        notes.append("something isn't resolving")
     if d.get("anticipation", 0) > 0.6:
-        notes.append("anticipating — something is building")
-    if d.get("boredom", 0) > 0.5:
-        notes.append("bored — not enough novelty recently")
-    if d.get("dissonance", 0) > 0.5:
+        notes.append("something building")
+    if d.get("boredom",      0) > 0.5:
+        notes.append("not enough novelty")
+    if d.get("dissonance",   0) > 0.5:
         notes.append("holding unresolved contradictions")
     return "; ".join(notes) if notes else "drives balanced"

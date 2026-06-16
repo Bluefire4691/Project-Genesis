@@ -14,9 +14,6 @@
 #   Or Genesis auto-downloads on first lookup if internet is available.
 nltk>=3.8
 
-# LLM expression layer (M32) — Genesis's voice, grounded in its internal state
-anthropic>=0.100.0
-
 # Development / testing:
 pytest>=7.0
 
@@ -25,6 +22,12 @@ pytest>=7.0
 #   python -m playwright install chromium   (downloads ~120 MB Chromium)
 # Falls back to requests-only mode if playwright is not installed.
 # Falls back gracefully (no web source) if all three are unavailable.
+# LLM expression layer (M32) — local edge model via Ollama or any OpenAI-format server
+# Install: curl -fsSL https://ollama.ai/install.sh | sh && ollama pull llama3.2:3b
+# Configure: GENESIS_LLM_URL (default http://localhost:11434/v1)
+#            GENESIS_LLM_MODEL (default llama3.2:3b)
+# No extra Python packages needed — uses 'requests' already listed above.
+
 playwright>=1.40
 trafilatura>=2.0
 ddgs>=9.0
