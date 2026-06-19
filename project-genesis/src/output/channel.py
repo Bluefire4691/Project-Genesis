@@ -132,6 +132,20 @@ class AudioChannel(OutputChannel):
         return "audio"
 
 
+class NullChannel(OutputChannel):
+    """Silences all output — used by the UI to capture expressions via queue."""
+
+    def send(self, text: str) -> None:
+        pass
+
+    def available(self) -> bool:
+        return True
+
+    @property
+    def name(self) -> str:
+        return "null"
+
+
 class MultiChannel(OutputChannel):
     """Broadcasts to multiple channels simultaneously."""
 
