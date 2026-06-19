@@ -12,9 +12,9 @@ Run:
 
 Resource commands (adjustable while running):
     speed N     — 1 (slowest) to 10 (max). Default 5.
-    memory N    — working-memory slots (default 30).
-    explore     — break out of current topic fixation.
+    memory N    — working-memory slots (wider attention = more options).
     fetch N     — topics per web-fetch cycle (default 3).
+    explore     — break out of current topic fixation.
 """
 
 import os
@@ -167,10 +167,15 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 3,
     # ── Shared controls (adjusted by user commands at runtime) ────────────
     # Background thread reads these; main thread writes them under lock.
 
+    try:
+        _mem_cap = brain.memory._working.capacity
+    except Exception:
+        _mem_cap = 5000
+
     ctrl_lock = threading.Lock()
     controls = {
         "speed":         initial_speed,
-        "memory":        brain.memory.capacity if hasattr(brain.memory, "capacity") else 30,
+        "memory":        _mem_cap,
         "fetch_topics":  fetch_topics,
         "explore_flag":  False,   # set True to force topic reset
     }
@@ -213,10 +218,14 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 3,
                 cycle_sleep  = _SPEED_TABLE.get(speed, 0.02)
                 fetch_every  = max(10, 80 - speed * 7)  # 73→10 cycles between fetches
 
-                # Force new curiosity topic when user asked for it
+                # Force new curiosity topic when user asked for it.
+                # Fixation lives in the curiosity-directive frontier; clearing
+                # it lets fresh input repopulate the targets (memory is untouched
+                # — long-term store keeps everything).
                 if do_explore:
                     try:
-                        brain.curiosity.reset_active_topics()
+                        brain._curiosity_directives.clear()
+                        brain._save_directives()
                     except Exception:
                         pass
                     current_topic = ""
@@ -393,7 +402,7 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 3,
                         with ctrl_lock:
                             controls["memory"] = n
                         try:
-                            brain.memory.capacity = n
+                            brain.memory._working.capacity = n
                         except Exception:
                             pass
                         console.print(f"  [dim]Working memory set to {n} slots.[/dim]")
@@ -553,10 +562,13 @@ def _handle_raw_command(brain, cmd: str, arg: str) -> None:
         elif cmd == "relations":
             if arg:
                 try:
-                    paths = brain.relations.neighbours(arg, top_k=5)
-                    if paths:
-                        desc = "; ".join(f"{p[0]} ({p[1]:.2f})" for p in paths)
-                        _print_genesis(f"{arg} connects to: {desc}")
+                    rels = brain.relations.query_subject(arg, min_confidence=0.3)
+                    if rels:
+                        desc = "; ".join(
+                            f"{r['relation']} {r['object']} ({r['confidence']:.2f})"
+                            for r in rels[:5]
+                        )
+                        _print_genesis(f"{arg}: {desc}")
                     else:
                         _print_genesis(f"No associations for '{arg}' yet.")
                 except Exception:

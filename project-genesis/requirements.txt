@@ -13,5 +13,8 @@ ddgs>=9.0
 # HTTP (stdlib on most systems, explicit here for clarity)
 requests>=2.28
 
+# Terminal UI (clean single-window chat + live status)
+rich>=13.0
+
 # Development / testing
 pytest>=7.0

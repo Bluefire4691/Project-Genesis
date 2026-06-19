@@ -38,9 +38,15 @@ echo  [4/4] Done.
 echo.
 echo  To run Genesis:
 echo.
+echo    Double-click  launch_genesis.bat   (recommended)
+echo.
+echo  Or from a terminal:
 echo    cd src
-echo    python main.py                          <- first run (builds foundation)
-echo    python main.py --resume --open-only --cycles 500 --self-directed
+echo    python ui.py                 <- first run (builds foundation, ~1 min)
+echo    python ui.py --resume --self-directed
+echo.
+echo  Once it's running, type to talk. Live resource controls:
+echo    speed N (1-10)   memory N   fetch N   explore
 echo.
 echo  Optional — LLM voice (richer conversation):
 echo    Install Ollama from https://ollama.com

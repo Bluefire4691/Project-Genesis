@@ -24,10 +24,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo  Step 1 of 3 - Installing web browsing packages...
-echo  (spacy, trafilatura, ddgs)
+echo  Step 1 of 3 - Installing packages...
+echo  (spacy, trafilatura, ddgs, rich, psutil)
 echo.
-pip install spacy trafilatura ddgs
+pip install spacy trafilatura ddgs rich psutil
 if errorlevel 1 (
     echo.
     echo  WARNING: Some packages may not have installed cleanly.

@@ -22,24 +22,29 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo  Starting Genesis... resuming previous session.
-echo  Genesis will think and learn continuously.
-echo.
-echo  TWO windows will open:
-echo    - THIS window: talk to Genesis (just type).
-echo    - "Genesis - Live Thoughts": watch it think and learn.
-echo  Type anything to talk. Use /quit to exit.
-echo.
+:: Make sure the UI library is present (one-time, only installs if missing)
+python -c "import rich" >nul 2>&1 || (
+    echo  First run of the new UI - installing 'rich' ^(once^)...
+    pip install rich >nul 2>&1
+)
 
-:: Make sure the thoughts log exists, then open a second window that streams it.
-:: This is Genesis's "stream of thought" — it runs alongside the conversation
-:: window so the thinking never floods the place where you type.
-if not exist data mkdir data
-if not exist data\genesis_thoughts.log type nul > data\genesis_thoughts.log
-start "Genesis - Live Thoughts" powershell -NoExit -Command "chcp 65001 | Out-Null; [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-Content -Path 'data\genesis_thoughts.log' -Wait -Tail 40 -Encoding UTF8"
+echo  Starting Genesis... resuming previous session.
+echo.
+echo  Genesis thinks and learns continuously in the background.
+echo  This single window stays clean: you only see what it chooses
+echo  to express, plus a quiet status line every 30 seconds.
+echo.
+echo  Just type to talk. Useful commands:
+echo    speed N     give it more CPU   (1 = gentle, 10 = full tilt)
+echo    memory N    wider attention    (more concepts held at once)
+echo    fetch N     read more per cycle
+echo    explore     break out of a topic it's stuck on
+echo    reflect     make it consolidate now
+echo    status      where it's at      ^|   quit   save and exit
+echo.
 
 chcp 65001 > nul
-python src/main.py --open-only --resume --live
+python src\ui.py --resume --self-directed
 
 echo.
 echo  Genesis session ended.
