@@ -305,3 +305,225 @@ class TestOrchestratorIntegration:
         finally:
             if os.path.exists(db):
                 os.unlink(db)
+
+
+# ── M34 Seed drives ────────────────────────────────────────────────────────
+
+from survival.drives import (
+    _SEED_WANTING_LOW, _SEED_REST_PATIENCE,
+    _SEED_SURVIVE_THRESHOLD, _compute_wanting,
+)
+
+
+class TestComputeWanting:
+    def test_empty_history_zero(self):
+        assert _compute_wanting([]) == 0.0
+
+    def test_single_entry_zero(self):
+        assert _compute_wanting([0.5]) == 0.0
+
+    def test_falling_error_positive_wanting(self):
+        hist = [0.9, 0.8, 0.7, 0.3, 0.2, 0.1]
+        assert _compute_wanting(hist) > 0.0
+
+    def test_rising_error_negative_wanting(self):
+        hist = [0.1, 0.2, 0.3, 0.8, 0.9, 1.0]
+        assert _compute_wanting(hist) < 0.0
+
+    def test_bounded(self):
+        hist = [1.0] * 6 + [0.0] * 6
+        w = _compute_wanting(hist)
+        assert -1.0 <= w <= 1.0
+
+
+class TestUpdateSeed:
+    def test_wanting_updates_each_cycle(self):
+        ds, _ = _fresh_drives()
+        ds.update_seed(pred_error=0.9, n_directives=5, resource_energy=1.0)
+        ds.update_seed(pred_error=0.9, n_directives=5, resource_energy=1.0)
+        ds.update_seed(pred_error=0.9, n_directives=5, resource_energy=1.0)
+        ds.update_seed(pred_error=0.1, n_directives=5, resource_energy=1.0)
+        ds.update_seed(pred_error=0.1, n_directives=5, resource_energy=1.0)
+        ds.update_seed(pred_error=0.1, n_directives=5, resource_energy=1.0)
+        # Error fell sharply → wanting should be positive
+        assert ds._state.wanting > 0.0
+
+    def test_survive_alarm_when_energy_low(self):
+        ds, _ = _fresh_drives()
+        low_energy = 1.0 - _SEED_SURVIVE_THRESHOLD - 0.05
+        ds.update_seed(pred_error=0.5, n_directives=3, resource_energy=low_energy)
+        assert ds._state.survive_alarm is True
+
+    def test_no_alarm_when_energy_ok(self):
+        ds, _ = _fresh_drives()
+        ds.update_seed(pred_error=0.5, n_directives=3, resource_energy=0.9)
+        assert ds._state.survive_alarm is False
+
+    def test_empowerment_rises_with_directives(self):
+        ds, _ = _fresh_drives()
+        ds.update_seed(pred_error=0.5, n_directives=0, resource_energy=1.0)
+        emp_low = ds._state.empowerment
+        for _ in range(10):
+            ds.update_seed(pred_error=0.5, n_directives=20, resource_energy=1.0)
+        assert ds._state.empowerment > emp_low
+
+    def test_rest_pending_after_sustained_low_wanting(self):
+        ds, _ = _fresh_drives()
+        # Feed flat high error so wanting stays near zero
+        for _ in range(_SEED_REST_PATIENCE + 2):
+            ds.update_seed(pred_error=0.5, n_directives=0, resource_energy=1.0)
+        assert ds._state.rest_pending is True
+
+    def test_rest_streak_resets_during_falling_error(self):
+        ds, _ = _fresh_drives()
+        # Build up rest streak with flat error
+        for _ in range(_SEED_REST_PATIENCE + 2):
+            ds.update_seed(pred_error=0.5, n_directives=0, resource_energy=1.0)
+        assert ds._state.rest_pending is True
+        # 3 falling-error cycles → gradient positive → streak resets.
+        # (After ~6 uniform cycles gradient returns to 0 and streak rebuilds —
+        # that is correct: Genesis adapted to the new error level.)
+        for _ in range(3):
+            ds.update_seed(pred_error=0.1, n_directives=5, resource_energy=1.0)
+        assert ds._rest_streak == 0
+
+    def test_liking_positive_when_empowerment_grows(self):
+        ds, _ = _fresh_drives()
+        ds.update_seed(pred_error=0.5, n_directives=0, resource_energy=1.0)
+        ds.update_seed(pred_error=0.5, n_directives=20, resource_energy=1.0)
+        # Second call: empowerment jumped → liking should be positive
+        assert ds._state.liking > 0.0
+
+
+class TestSeedAction:
+    def test_alarm_overrides_all(self):
+        ds, _ = _fresh_drives()
+        ds._state.survive_alarm = True
+        ds._state.rest_pending  = True
+        ds._state.wanting       = 1.0
+        assert ds.seed_action() == "alarm"
+
+    def test_rest_overrides_explore(self):
+        ds, _ = _fresh_drives()
+        ds._state.survive_alarm = False
+        ds._state.rest_pending  = True
+        ds._state.wanting       = 1.0
+        assert ds.seed_action() == "rest"
+
+    def test_explore_when_high_wanting(self):
+        ds, _ = _fresh_drives()
+        ds._state.survive_alarm = False
+        ds._state.rest_pending  = False
+        ds._state.wanting       = 0.8
+        assert ds.seed_action() == "explore"
+
+    def test_consolidate_when_liking_moderate(self):
+        ds, _ = _fresh_drives()
+        ds._state.survive_alarm = False
+        ds._state.rest_pending  = False
+        ds._state.wanting       = 0.1
+        ds._state.liking        = 0.5
+        assert ds.seed_action() == "consolidate"
+
+    def test_idle_default(self):
+        ds, _ = _fresh_drives()
+        assert ds.seed_action() == "idle"
+
+
+class TestSeedExpressiveState:
+    def test_survive_alarm_phrase(self):
+        ds, _ = _fresh_drives()
+        ds._state.survive_alarm = True
+        phrase = ds.expressive_state()
+        assert phrase is not None and "conserve" in phrase
+
+    def test_rest_pending_phrase(self):
+        ds, _ = _fresh_drives()
+        ds._state.survive_alarm = False
+        ds._state.rest_pending = True
+        # Need dominant M26 drive to be above _STRONG for phrase to fire
+        ds._state.dissonance = 0.9
+        phrase = ds.expressive_state()
+        assert phrase is not None and "consolidate" in phrase
+
+    def test_high_wanting_phrase(self):
+        ds, _ = _fresh_drives()
+        ds._state.anticipation = 0.9   # make Tier-1 dominant
+        ds._state.wanting = 0.8
+        phrase = ds.expressive_state()
+        assert phrase is not None and "pulling" in phrase
+
+
+class TestSeedPersistence:
+    def test_seed_state_round_trips(self):
+        import tempfile, os
+        db = tempfile.mktemp(suffix=".db")
+        try:
+            conn1 = sqlite3.connect(db)
+            ds1 = DriveSystem(conn1)
+            ds1._state.wanting     = 0.7
+            ds1._state.liking      = 0.3
+            ds1._state.empowerment = 0.6
+            ds1._rest_streak       = 4
+            ds1._error_history     = [0.5, 0.4, 0.3]
+            ds1.save()
+            conn1.close()
+
+            conn2 = sqlite3.connect(db)
+            ds2 = DriveSystem(conn2)
+            ds2.restore()
+            assert ds2._state.wanting     == pytest.approx(0.7)
+            assert ds2._state.liking      == pytest.approx(0.3)
+            assert ds2._state.empowerment == pytest.approx(0.6)
+            assert ds2._rest_streak       == 4
+            assert len(ds2._error_history) == 3
+            conn2.close()
+        finally:
+            if os.path.exists(db):
+                os.unlink(db)
+
+
+class TestSeedOrchestratorWiring:
+    def test_seed_signals_in_result(self):
+        import tempfile, os
+        from orchestrator.orchestrator import Orchestrator
+        db = tempfile.mktemp(suffix=".db")
+        try:
+            b = Orchestrator(verbose=False, db_path=db)
+            result = b.process_input("text", "Dogs chase cats through the park.")
+            assert "drives" in result
+            drives = result["drives"]
+            for key in ("wanting", "liking", "empowerment", "seed_action"):
+                assert key in drives, f"missing key: {key}"
+        finally:
+            if os.path.exists(db):
+                os.unlink(db)
+
+    def test_seed_summary_has_all_keys(self):
+        import tempfile, os
+        from orchestrator.orchestrator import Orchestrator
+        db = tempfile.mktemp(suffix=".db")
+        try:
+            b = Orchestrator(verbose=False, db_path=db)
+            b.process_input("text", "Water flows downhill.")
+            summary = b.drives.summary()
+            for key in ("wanting", "liking", "empowerment",
+                        "survive_alarm", "rest_pending", "seed_action"):
+                assert key in summary, f"missing key: {key}"
+        finally:
+            if os.path.exists(db):
+                os.unlink(db)
+
+    def test_behavioral_hints_has_seed_keys(self):
+        import tempfile, os
+        from orchestrator.orchestrator import Orchestrator
+        db = tempfile.mktemp(suffix=".db")
+        try:
+            b = Orchestrator(verbose=False, db_path=db)
+            hints = b.drives.behavioral_hints()
+            for key in ("seed_action", "wanting", "liking",
+                        "empowerment", "survive_alarm", "rest_pending"):
+                assert key in hints, f"missing key: {key}"
+        finally:
+            if os.path.exists(db):
+                os.unlink(db)

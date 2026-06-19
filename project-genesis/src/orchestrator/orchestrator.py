@@ -310,15 +310,31 @@ class Orchestrator:
             self._log(f"⚠ Orchestrator error (non-fatal): {e}")
             return {"status": "degraded", "reason": str(e), "cycle": self.cycle_count}
 
-        # M26 drive hint: if dissonance is strong and we haven't reflected recently,
-        # trigger a consolidation pass now rather than waiting for the next scheduled one.
-        if (self.cycle_count - self._last_reflect_cycle) >= 20:
-            try:
-                if self.drives.behavioral_hints().get("reflect_sooner"):
+        # M34: Seed drive post-cycle behavior selection (subsumption).
+        # seed_action() returns: alarm | rest | explore | consolidate | idle
+        try:
+            hints = self.drives.behavioral_hints()
+            seed_act = hints.get("seed_action", "idle")
+
+            if seed_act == "rest":
+                # REST: trigger consolidation if it hasn't run recently.
+                # Shorter cooldown than the M26 dissonance trigger (10 vs 20 cycles)
+                # because REST means sustained low wanting — not just one bad cycle.
+                if (self.cycle_count - self._last_reflect_cycle) >= 10:
                     self.reflect()
                     self._last_reflect_cycle = self.cycle_count
-            except Exception as exc:
-                self.survival.resilience.error_log.log("drives.reflect_sooner", exc)
+            elif seed_act in ("explore", "idle"):
+                # EXPLORE: also honour the M26 dissonance-based reflect trigger
+                # at the normal 20-cycle cadence so dissonance still resolves.
+                if (self.cycle_count - self._last_reflect_cycle) >= 20:
+                    if hints.get("reflect_sooner"):
+                        self.reflect()
+                        self._last_reflect_cycle = self.cycle_count
+            # "alarm" defers to SurvivalOS throttling (already in effect).
+            # "consolidate" is a soft signal — no forced reflect; the next
+            # REST cycle will handle it.
+        except Exception as exc:
+            self.survival.resilience.error_log.log("drives.seed_action", exc)
 
         return result
 
@@ -378,6 +394,17 @@ class Orchestrator:
 
         # M17: Update curiosity directives before storing (uses pre-update graph state)
         self._update_curiosity_directives(synthesis.context_terms, pred_error)
+
+        # M34: Update seed drives (SURVIVE/ELABORATE/REST + wanting/liking/empowerment).
+        # Runs after curiosity directives so n_directives is current.
+        try:
+            self.drives.update_seed(
+                pred_error    = pred_error,
+                n_directives  = len(self._curiosity_directives),
+                resource_energy = self.survival.resource.budget.energy,
+            )
+        except Exception as exc:
+            self.survival.resilience.error_log.log("drives.seed", exc)
 
         # Store everything if resources allow
         wm_before = len(self.memory.memories)
@@ -444,6 +471,17 @@ class Orchestrator:
             new_contradictions=new_contradictions,
         )
 
+        # M34: Include seed drive signals in result for observability
+        drive_summary = {}
+        try:
+            drive_summary = {
+                k: v for k, v in self.drives.summary().items()
+                if k in ("wanting", "liking", "empowerment", "seed_action",
+                         "survive_alarm", "rest_pending")
+            }
+        except Exception:
+            pass
+
         return {
             "status": "processed",
             "output": synthesis.primary_output.extracted,
@@ -459,6 +497,7 @@ class Orchestrator:
             "wm_delta": wm_delta,
             "prediction_error": pred_error,
             "expression": expression,
+            "drives": drive_summary,
         }
 
     def _active_processors(self, input_type: str) -> dict:
@@ -1042,14 +1081,25 @@ class Orchestrator:
             for concept in resolved:
                 self._curiosity_directives.pop(concept, None)
 
-            # M26 drive wire: curiosity_boost lowers the registration threshold
-            # when hunger is strong, making Genesis more sensitive to gaps.
+            # Drive-gated threshold: M26 hunger lowers it, M34 seed action modifies it.
+            # explore → 20% more sensitive (ELABORATE drive active)
+            # alarm   → 30% less sensitive (SURVIVE takes precedence, shed new work)
             curiosity_boost = 0.0
+            seed_modifier   = 0.0
             try:
-                curiosity_boost = self.drives.behavioral_hints().get("curiosity_boost", 0.0)
+                hints = self.drives.behavioral_hints()
+                curiosity_boost = hints.get("curiosity_boost", 0.0)
+                seed_act = hints.get("seed_action", "idle")
+                if seed_act == "explore":
+                    seed_modifier = -0.10   # lower threshold → register more
+                elif seed_act == "alarm":
+                    seed_modifier = +0.15   # raise threshold → focus, shed breadth
             except Exception:
                 pass
-            effective_threshold = max(0.55, self._DIRECTIVE_PRED_ERROR_MIN - curiosity_boost * 0.15)
+            effective_threshold = max(
+                0.50,
+                self._DIRECTIVE_PRED_ERROR_MIN - curiosity_boost * 0.15 + seed_modifier
+            )
 
             # Register new directives from high-surprise context terms
             if (pred_error >= effective_threshold
