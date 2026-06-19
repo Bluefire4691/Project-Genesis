@@ -206,6 +206,20 @@ class GenesisBrowser:
     Thread-safe: a single lock guards the rate-limit table and robots cache.
     Each Playwright fetch creates its own context (no cross-thread browser
     state). Requests fetches are inherently stateless.
+
+    Browser connection (in priority order):
+      1. GENESIS_BROWSER_WS  — WebSocket endpoint of a running Playwright
+                               browser server (playwright run-server, or a
+                               browser launched with browser.new_server())
+      2. GENESIS_BROWSER_CDP — Chrome DevTools Protocol endpoint of an
+                               existing Chrome/Chromium process started with
+                               --remote-debugging-port=N
+      3. Launch own headless Chromium (original behaviour, always available
+         when playwright is installed)
+
+    Set these env vars to share another application's browser:
+      export GENESIS_BROWSER_WS="ws://localhost:3000"   # Playwright server
+      export GENESIS_BROWSER_CDP="http://localhost:9222" # Chrome CDP
     """
 
     def __init__(self, db_conn=None, min_delay_s: float = 3.0):
@@ -215,6 +229,9 @@ class GenesisBrowser:
         self._robots_cache: dict[str, RobotFileParser | None] = {}
         self._lock = threading.Lock()
         self._error_log = None   # set by feeder after construction
+        # External browser endpoints (from env)
+        self._ws_endpoint  = os.environ.get("GENESIS_BROWSER_WS", "").strip()
+        self._cdp_endpoint = os.environ.get("GENESIS_BROWSER_CDP", "").strip()
         self._init_schema()
 
     # ------------------------------------------------------------------
@@ -415,7 +432,10 @@ class GenesisBrowser:
         try:
             from playwright.sync_api import sync_playwright
             with sync_playwright() as pw:
-                browser = pw.chromium.launch(headless=True)
+                browser = self._connect_browser(pw)
+                owns_browser = browser is None
+                if owns_browser:
+                    browser = pw.chromium.launch(headless=True)
                 ctx = browser.new_context(
                     user_agent=_UA,
                     viewport={"width": 1280, "height": 800},
@@ -432,11 +452,36 @@ class GenesisBrowser:
                     html = page.content()
                 finally:
                     ctx.close()
-                    browser.close()
+                    # Only close a browser we launched ourselves.
+                    # A shared/external browser stays open for its owner.
+                    if owns_browser:
+                        browser.close()
             return self._build_result(url, title, html)
         except Exception as exc:
             self._log_error(f"browser.playwright:{urlparse(url).netloc}", exc)
             return None
+
+    def _connect_browser(self, pw):
+        """Return an existing browser connection, or None to launch a new one.
+
+        Tries GENESIS_BROWSER_WS (Playwright server) first, then
+        GENESIS_BROWSER_CDP (Chrome DevTools Protocol).  Returns None if
+        neither env var is set or the connection fails — caller falls back to
+        launching its own browser.
+        """
+        if self._ws_endpoint:
+            try:
+                browser = pw.chromium.connect(self._ws_endpoint)
+                return browser
+            except Exception as exc:
+                self._log_error("browser.connect_ws", exc)
+        if self._cdp_endpoint:
+            try:
+                browser = pw.chromium.connect_over_cdp(self._cdp_endpoint)
+                return browser
+            except Exception as exc:
+                self._log_error("browser.connect_cdp", exc)
+        return None
 
     def _fetch_requests(self, url: str) -> PageResult | None:
         try:
