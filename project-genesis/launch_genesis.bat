@@ -15,7 +15,7 @@ rem Requirements: Python 3.10+ on PATH, pip install -r requirements.txt
 
 chcp 65001 > nul
 
-rem Ensure the UI library is present (only installs if missing)
-python -c "import rich" >nul 2>&1 || pip install rich >nul 2>&1
+rem Install GUI dependencies if missing (one-time)
+python -c "import PyQt6" >nul 2>&1 || pip install PyQt6 matplotlib >nul 2>&1
 
-python src\ui.py --resume --self-directed --speed 8 --batch 10 %*
+python src\gui.py --resume --self-directed --speed 8 --batch 10 %*

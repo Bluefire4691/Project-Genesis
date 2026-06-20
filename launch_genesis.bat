@@ -22,29 +22,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
-:: Make sure the UI library is present (one-time, only installs if missing)
-python -c "import rich" >nul 2>&1 || (
-    echo  First run of the new UI - installing 'rich' ^(once^)...
-    pip install rich >nul 2>&1
+:: Install GUI dependencies if missing (one-time)
+python -c "import PyQt6" >nul 2>&1 || (
+    echo  Installing desktop GUI dependencies ^(PyQt6 + matplotlib^)...
+    pip install PyQt6 matplotlib >nul 2>&1
 )
 
-echo  Starting Genesis... resuming previous session.
-echo.
-echo  Genesis thinks and learns continuously in the background.
-echo  This single window stays clean: you only see what it chooses
-echo  to express, plus a quiet status line every 30 seconds.
-echo.
-echo  Just type to talk. Useful commands:
-echo    speed N     give it more CPU   (1 = gentle, 10 = full tilt)
-echo    memory N    wider attention    (more concepts held at once)
-echo    fetch N     read more per cycle
-echo    explore     break out of a topic it's stuck on
-echo    reflect     make it consolidate now
-echo    status      where it's at      ^|   quit   save and exit
+echo  Starting Genesis desktop window...
 echo.
 
 chcp 65001 > nul
-python src\ui.py --resume --self-directed --speed 8 --batch 10
+python src\gui.py --resume --self-directed --speed 8 --batch 10
 
 echo.
 echo  Genesis session ended.

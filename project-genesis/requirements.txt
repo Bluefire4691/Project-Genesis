@@ -16,5 +16,9 @@ requests>=2.28
 # Terminal UI (clean single-window chat + live status)
 rich>=13.0
 
+# Desktop GUI (sliders, live graphs, drive monitors)
+PyQt6>=6.5
+matplotlib>=3.7
+
 # Development / testing
 pytest>=7.0

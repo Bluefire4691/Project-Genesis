@@ -19,5 +19,12 @@ $host.UI.RawUI.WindowTitle = "Genesis"
 
 $ProjectRoot = $PSScriptRoot
 
-# Start Genesis with all passed arguments
-& python (Join-Path $ProjectRoot "src\ui.py") --resume --self-directed --speed 8 --batch 10 @args
+# Install GUI dependencies if missing
+python -c "import PyQt6" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Installing desktop GUI dependencies (PyQt6 + matplotlib)..."
+    pip install PyQt6 matplotlib
+}
+
+# Launch the desktop GUI
+& python (Join-Path $ProjectRoot "src\gui.py") --resume --self-directed --speed 8 --batch 10 @args
