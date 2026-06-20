@@ -98,11 +98,11 @@ _UA = (
 )
 
 # Scientific/research domains — bonus score for link following
+# Note: paywalled domains are intentionally excluded even if they are scientific
 _SCIENTIFIC_DOMAINS = frozenset({
     "arxiv.org", "pubmed.ncbi.nlm.nih.gov", "semanticscholar.org",
-    "ncbi.nlm.nih.gov", "nature.com", "science.org", "cell.com",
-    "plos.org", "biorxiv.org", "medrxiv.org", "chemrxiv.org",
-    "europepmc.org", "openalex.org", "en.wikipedia.org",
+    "ncbi.nlm.nih.gov", "plos.org", "biorxiv.org", "medrxiv.org",
+    "chemrxiv.org", "europepmc.org", "openalex.org", "en.wikipedia.org",
     "encyclopediaoflife.org", "scholar.google.com",
 })
 
@@ -115,12 +115,28 @@ _PAYWALL_PHRASES = frozenset({
     "to continue reading", "members only", "premium content",
 })
 
-# Domains known to paywall most content
+# Domains (and suffixes) known to paywall most content.
+# Checked before any network call so no time is wasted on timeouts.
+# Match by suffix so subdomains (link.springer.com, wayf.springernature.com) are caught.
 _PAYWALL_DOMAINS = frozenset({
-    "nature.com", "science.org", "cell.com", "nejm.org", "thelancet.com",
-    "sciencedirect.com", "springer.com", "wiley.com", "tandfonline.com",
-    "journals.sagepub.com", "jstor.org", "ieeexplore.ieee.org",
+    "nature.com", "springernature.com", "springer.com",
+    "science.org", "cell.com", "thelancet.com", "nejm.org",
+    "sciencedirect.com", "elsevier.com",
+    "wiley.com", "onlinelibrary.wiley.com",
+    "tandfonline.com", "journals.sagepub.com",
+    "jstor.org", "ieeexplore.ieee.org",
+    "oup.com", "academic.oup.com",
+    "bmj.com", "jamanetwork.com",
 })
+
+
+def _is_blocked_domain(url: str) -> bool:
+    """Return True if the URL's domain matches any entry in _PAYWALL_DOMAINS."""
+    try:
+        netloc = urlparse(url).netloc.lower().lstrip("www.")
+        return any(netloc == d or netloc.endswith("." + d) for d in _PAYWALL_DOMAINS)
+    except Exception:
+        return False
 
 # Link anchor text / href patterns to skip entirely
 _SKIP_PATTERNS = frozenset({
@@ -277,6 +293,8 @@ class GenesisBrowser:
             return None
 
         domain = urlparse(url).netloc
+        if _is_blocked_domain(url):
+            return None
         self._rate_limit(domain)
 
         result = None
