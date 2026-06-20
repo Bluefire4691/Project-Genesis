@@ -36,11 +36,16 @@ import time
 import queue
 import threading
 import textwrap
+from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from rich.console import Console
 from rich.rule import Rule
+
+
+class _Busy(Exception):
+    """Raised when the brain lock can't be acquired in time (mid web-fetch)."""
 
 # ── Colour / style tokens ─────────────────────────────────────────────────
 
@@ -175,6 +180,18 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
     # access is serialised. Reentrant so a holder can call helpers that
     # re-acquire.
     brain_lock = threading.RLock()
+
+    @contextmanager
+    def _access(timeout: float = 2.5):
+        """Acquire the brain lock or raise _Busy. Keeps the UI from ever
+        freezing behind a slow web fetch."""
+        if not brain_lock.acquire(timeout=timeout):
+            raise _Busy
+        try:
+            yield
+        finally:
+            brain_lock.release()
+
     controls = {
         "speed":        initial_speed,
         "batch":        initial_batch,
@@ -316,6 +333,11 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
         # First fetch after a short warm-up so cognition settles first.
         stop_evt.wait(8.0)
         while not stop_evt.is_set():
+            # Defer if the user is mid-conversation — keep the lock free for
+            # the UI so commands stay snappy.
+            if not input_q.empty():
+                stop_evt.wait(1.5)
+                continue
             with ctrl_lock:
                 n_fetch = controls["fetch_topics"]
             try:
@@ -357,7 +379,7 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
     _header()
 
     try:
-        with brain_lock:
+        with _access(timeout=10.0):
             greeting = brain.voice.wake_greeting()
         if greeting:
             _print_genesis(greeting)
@@ -442,11 +464,13 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
                         n = max(100, int(arg))
                         with ctrl_lock:
                             controls["memory"] = n
-                        with brain_lock:
-                            try:
-                                brain.memory._working.capacity = n
-                            except Exception:
-                                pass
+                        # Plain int assignment — no brain_lock needed, stays
+                        # responsive even during a fetch. Cognition reads it
+                        # fresh each cycle.
+                        try:
+                            brain.memory._working.capacity = n
+                        except Exception:
+                            pass
                         note = ""
                         if n > 3000:
                             note = "  (large — attention re-sorts each cycle, may slow throughput)"
@@ -470,99 +494,87 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
                         "  [dim]Breaking current topic — new direction next batch.[/dim]"
                     )
 
-                # ── Knowledge / reflection ────────────────────────────────
-                elif cmd == "reflect":
-                    console.print("  [dim]Reflecting…[/dim]")
-                    try:
-                        with brain_lock:
-                            rep = brain.reflect(cycle=brain.cycle_count)
-                        _print_genesis(rep.get("summary")
-                                       or "I reflected but nothing crystallised yet.")
-                    except Exception as e:
-                        console.print(f"  [dim]reflect error: {e}[/dim]")
-
-                elif cmd == "thoughts":
-                    try:
-                        with brain_lock:
-                            latest = brain.latest_reflection()
-                        if latest:
-                            _print_genesis(latest["summary"])
-                        else:
-                            _print_genesis("I haven't reflected yet. Type 'reflect'.")
-                    except Exception:
-                        _print_genesis("I can't retrieve my thoughts right now.")
-
-                elif cmd == "curiosity":
-                    try:
-                        with brain_lock:
-                            report = brain.curiosity_report()
-                        if report:
-                            topics = ", ".join(r["concept"] for r in report[:5])
-                            _print_genesis(f"I most want to understand: {topics}.")
-                        else:
-                            _print_genesis("I haven't formed strong curiosity targets yet.")
-                    except Exception:
-                        _print_genesis("I can't access my curiosity targets right now.")
-
-                elif cmd == "learn":
-                    with ctrl_lock:
-                        n = int(arg) if arg.isdigit() else controls["fetch_topics"]
-                    console.print(f"  [dim]Fetching {n} topics…[/dim]")
-                    try:
-                        with brain_lock:
-                            res = brain.fetch_knowledge(n_topics=n, verbose=False)
-                        topics = _fetched_topics(res)
-                        _print_genesis(
-                            f"I read about {', '.join(topics[:3])}."
-                            if topics else "Nothing new came back from that search."
-                        )
-                    except Exception as e:
-                        console.print(f"  [dim]learn error: {e}[/dim]")
-
-                elif cmd == "status":
-                    try:
-                        with brain_lock:
-                            s = brain.full_status()
-                            d = brain.drives.summary()
-                        with ctrl_lock:
-                            sp, bt = controls["speed"], controls["batch"]
-                        _print_genesis(
-                            f"Cycle {s['cycles']:,}. "
-                            f"{s['memory']['total_stored']:,} memories, "
-                            f"{s.get('relations',{}).get('total_relations',0):,} associations. "
-                            f"Drives: {d['dominant']} {d['dominant_level']:.2f}, "
-                            f"wanting {d['wanting']:+.2f}. "
-                            f"Speed {sp}/10 × batch {bt} ({_last_cps:.0f} cycles/s)."
-                        )
-                    except Exception as e:
-                        console.print(f"  [dim]status error: {e}[/dim]")
-
-                elif cmd == "save":
-                    try:
-                        with brain_lock:
-                            brain.save_session()
-                        console.print("  [dim]Session saved.[/dim]")
-                    except Exception:
-                        console.print("  [dim]Save failed.[/dim]")
-
-                elif cmd in ("history", "relations", "summary"):
-                    with brain_lock:
-                        _handle_raw_command(brain, cmd, arg)
-
+                # ── Everything below needs the brain. Acquire with a short
+                #    timeout so a slow web fetch can never freeze the UI.
                 else:
+                    # status reads can fall back to the last broadcast snapshot
+                    # if the brain is busy, so it always answers something.
                     try:
-                        with brain_lock:
-                            reply = brain.voice.chat_respond(raw)
-                        _print_genesis(
-                            reply if reply else
-                            "I heard you. I'm still forming a response — "
-                            "try 'reflect' to help me consolidate."
+                        if cmd == "status":
+                            with _access():
+                                s = brain.full_status()
+                                d = brain.drives.summary()
+                            with ctrl_lock:
+                                sp, bt = controls["speed"], controls["batch"]
+                            _print_genesis(
+                                f"Cycle {s['cycles']:,}. "
+                                f"{s['memory']['total_stored']:,} memories, "
+                                f"{s.get('relations',{}).get('total_relations',0):,} associations. "
+                                f"Drives: {d['dominant']} {d['dominant_level']:.2f}, "
+                                f"wanting {d['wanting']:+.2f}. "
+                                f"Speed {sp}/10 × batch {bt} ({_last_cps:.0f} cycles/s)."
+                            )
+
+                        elif cmd == "reflect":
+                            console.print("  [dim]Reflecting…[/dim]")
+                            with _access(timeout=10.0):
+                                rep = brain.reflect(cycle=brain.cycle_count)
+                            _print_genesis(rep.get("summary")
+                                           or "I reflected but nothing crystallised yet.")
+
+                        elif cmd == "thoughts":
+                            with _access():
+                                latest = brain.latest_reflection()
+                            _print_genesis(latest["summary"] if latest
+                                           else "I haven't reflected yet. Type 'reflect'.")
+
+                        elif cmd == "curiosity":
+                            with _access():
+                                report = brain.curiosity_report()
+                            if report:
+                                topics = ", ".join(r["concept"] for r in report[:5])
+                                _print_genesis(f"I most want to understand: {topics}.")
+                            else:
+                                _print_genesis("I haven't formed strong curiosity targets yet.")
+
+                        elif cmd == "learn":
+                            with ctrl_lock:
+                                n = int(arg) if arg.isdigit() else controls["fetch_topics"]
+                            console.print(f"  [dim]Fetching {n} topics…[/dim]")
+                            with _access(timeout=60.0):
+                                res = brain.fetch_knowledge(n_topics=n, verbose=False)
+                            topics = _fetched_topics(res)
+                            _print_genesis(
+                                f"I read about {', '.join(topics[:3])}."
+                                if topics else "Nothing new came back from that search."
+                            )
+
+                        elif cmd == "save":
+                            with _access(timeout=10.0):
+                                brain.save_session()
+                            console.print("  [dim]Session saved.[/dim]")
+
+                        elif cmd in ("history", "relations", "summary"):
+                            with _access():
+                                _handle_raw_command(brain, cmd, arg)
+
+                        else:
+                            with _access():
+                                reply = brain.voice.chat_respond(raw)
+                            _print_genesis(
+                                reply if reply else
+                                "I heard you. I'm still forming a response — "
+                                "try 'reflect' to help me consolidate."
+                            )
+
+                    except _Busy:
+                        console.print(
+                            "  [dim]Genesis is deep in a web read right now — "
+                            "give it a few seconds and ask again. "
+                            "(speed / batch / explore still work instantly.)[/dim]"
                         )
-                    except Exception:
-                        _print_genesis(
-                            "Something disrupted my response. "
-                            "I'm still thinking in the background."
-                        )
+                    except Exception as e:
+                        console.print(f"  [dim]command error: {e}[/dim]")
 
             time.sleep(0.05)
 
@@ -571,7 +583,8 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
     finally:
         stop_evt.set()
         try:
-            with brain_lock:
+            # Best-effort save — don't hang shutdown behind an in-flight fetch.
+            with _access(timeout=30.0):
                 brain.save_session()
         except Exception:
             pass
