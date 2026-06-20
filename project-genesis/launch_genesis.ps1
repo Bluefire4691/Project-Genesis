@@ -20,4 +20,4 @@ $host.UI.RawUI.WindowTitle = "Genesis"
 $ProjectRoot = $PSScriptRoot
 
 # Start Genesis with all passed arguments
-& python (Join-Path $ProjectRoot "src\ui.py") --resume --self-directed @args
+& python (Join-Path $ProjectRoot "src\ui.py") --resume --self-directed --speed 8 --batch 10 @args

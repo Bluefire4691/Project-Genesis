@@ -18,4 +18,4 @@ chcp 65001 > nul
 rem Ensure the UI library is present (only installs if missing)
 python -c "import rich" >nul 2>&1 || pip install rich >nul 2>&1
 
-python src\ui.py --resume --self-directed %*
+python src\ui.py --resume --self-directed --speed 8 --batch 10 %*

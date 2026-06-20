@@ -44,7 +44,7 @@ echo    status      where it's at      ^|   quit   save and exit
 echo.
 
 chcp 65001 > nul
-python src\ui.py --resume --self-directed
+python src\ui.py --resume --self-directed --speed 8 --batch 10
 
 echo.
 echo  Genesis session ended.
