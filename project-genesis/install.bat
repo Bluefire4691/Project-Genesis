@@ -42,8 +42,8 @@ echo    Double-click  launch_genesis.bat   (recommended)
 echo.
 echo  Or from a terminal:
 echo    cd src
-echo    python ui.py                 <- first run (builds foundation, ~1 min)
-echo    python ui.py --resume --self-directed
+echo    python src\gui.py                <- first run (builds foundation, ~1 min)
+echo    python src\gui.py --resume --self-directed
 echo.
 echo  Once it's running, type to talk. Live resource controls:
 echo    speed N (1-10)   memory N   fetch N   explore

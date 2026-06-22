@@ -57,7 +57,7 @@ echo  Live controls: speed N (1-10)  memory N  fetch N  explore  quit
 echo.
 
 chcp 65001 > nul
-python src\ui.py --self-directed
+python src\gui.py --self-directed
 
 echo.
 echo  Genesis session ended.

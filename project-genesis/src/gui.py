@@ -51,14 +51,17 @@ _SPEED_TABLE = {
     6: 0.010, 7: 0.005, 8: 0.001, 9: 0.000, 10: 0.000,
 }
 
-_DRIVE_NAMES  = ["hunger", "wanting", "frustration", "boredom", "dissonance"]
+# Five biological-analog drives (all 0–1)
+_DRIVE_NAMES  = ["hunger", "anticipation", "frustration", "boredom", "dissonance"]
 _DRIVE_COLORS = {
-    "hunger":      "#e74c3c",
-    "wanting":     "#2ecc71",
-    "frustration": "#e67e22",
-    "boredom":     "#3498db",
-    "dissonance":  "#9b59b6",
+    "hunger":       "#e74c3c",
+    "anticipation": "#f1c40f",
+    "frustration":  "#e67e22",
+    "boredom":      "#3498db",
+    "dissonance":   "#9b59b6",
 }
+# M34 gradient signal (−1 → +1); displayed separately
+_WANTING_COLOR = "#2ecc71"
 
 _GRAPH_LEN    = 120   # 2 min of history at 1 data-point / second
 _STATUS_HZ    = 1.0   # status updates pushed to UI per second
@@ -276,10 +279,14 @@ class GenesisWindow(QMainWindow):
         self._cps_plot.setMinimumHeight(140)
         lay.addWidget(self._cps_plot, stretch=1)
 
+        # Drives + wanting on the same chart.
+        # Biological drives are 0–1; wanting is −1 → +1 mapped to 0–1 for display.
+        drive_series = [(n, _DRIVE_COLORS[n]) for n in _DRIVE_NAMES]
+        drive_series.append(("wanting ×½+½", _WANTING_COLOR))
         self._drive_plot = _RollingPlot(
-            title="Drive levels over time",
+            title="Drives over time  (wanting remapped 0–1)",
             y_label="level",
-            series=[(n, _DRIVE_COLORS[n]) for n in _DRIVE_NAMES],
+            series=drive_series,
             y_range=(0.0, 1.05),
         )
         self._drive_plot.setMinimumHeight(200)
@@ -347,7 +354,11 @@ class GenesisWindow(QMainWindow):
 
         self._drive_bars: dict[str, QProgressBar] = {}
         self._drive_lbls: dict[str, QLabel]       = {}
-        for name in _DRIVE_NAMES:
+        # Biological drives + wanting as a named row
+        _bar_rows = list(_DRIVE_NAMES) + ["wanting"]
+        _bar_colors = dict(_DRIVE_COLORS)
+        _bar_colors["wanting"] = _WANTING_COLOR
+        for name in _bar_rows:
             row  = QHBoxLayout()
             name_lbl = QLabel(name.capitalize()[:7])
             name_lbl.setFixedWidth(68)
@@ -359,15 +370,17 @@ class GenesisWindow(QMainWindow):
             bar.setValue(0)
             bar.setTextVisible(False)
             bar.setFixedHeight(14)
-            c = _DRIVE_COLORS[name]
+            c = _bar_colors[name]
             bar.setStyleSheet(
                 f"QProgressBar {{background:#1a1a2e; border:none; border-radius:3px;}}"
                 f"QProgressBar::chunk {{background:{c}; border-radius:3px;}}"
             )
             row.addWidget(bar, stretch=1)
 
-            val_lbl = QLabel("0.00")
-            val_lbl.setFixedWidth(34)
+            # wanting shows a signed value (+0.xxx)
+            init_txt = "+0.000" if name == "wanting" else "0.00"
+            val_lbl = QLabel(init_txt)
+            val_lbl.setFixedWidth(42)
             val_lbl.setStyleSheet(f"color:{c}; font-size:10px; font-family:monospace;")
             row.addWidget(val_lbl)
 
@@ -687,17 +700,24 @@ class GenesisWindow(QMainWindow):
 
         # Graphs
         self._cps_plot.push({"cycles/s": cps})
-        self._drive_plot.push({
-            n: min(1.0, max(0.0, abs(drives.get(n, 0.0))))
-            for n in _DRIVE_NAMES
-        })
+        drive_push = {n: min(1.0, max(0.0, drives.get(n, 0.0)))
+                      for n in _DRIVE_NAMES}
+        # wanting is −1 → +1; remap to 0–1 for display on the same chart
+        wanting_raw = drives.get("wanting", 0.0)
+        drive_push["wanting ×½+½"] = min(1.0, max(0.0, wanting_raw * 0.5 + 0.5))
+        self._drive_plot.push(drive_push)
 
-        # Drive bars + value labels
+        # Drive bars + value labels (biological drives only)
         for name in _DRIVE_NAMES:
             raw_val = drives.get(name, 0.0)
-            pct     = min(100, max(0, int(abs(raw_val) * 100)))
+            pct     = min(100, max(0, int(raw_val * 100)))
             self._drive_bars[name].setValue(pct)
-            self._drive_lbls[name].setText(f"{raw_val:+.2f}")
+            self._drive_lbls[name].setText(f"{raw_val:.2f}")
+
+        # Wanting bar (separate — signed value)
+        want_pct = min(100, max(0, int(wanting_raw * 100)))
+        self._drive_bars["wanting"].setValue(want_pct)
+        self._drive_lbls["wanting"].setText(f"{wanting_raw:+.3f}")
 
         # Active concepts
         if concepts:
@@ -812,13 +832,19 @@ class GenesisWindow(QMainWindow):
                     pass
 
                 # Status — throttled to _STATUS_HZ
+                # Call drives.summary() directly: the orchestrator's process_input
+                # result only carries the M34 seed drives (wanting/liking/empowerment),
+                # not the five biological drives (hunger/frustration/boredom/dissonance).
                 wall = time.monotonic()
                 if (wall - last_status) >= (1.0 / _STATUS_HZ):
                     last_status = wall
-                    drives      = last_result.get("drives", {})
                     try:
-                        concepts = list(brain.memory._working._context_terms[:16])
+                        with self._brain_lock:
+                            drives   = brain.drives.summary()
+                            concepts = list(
+                                brain.memory._working._context_terms[:16])
                     except Exception:
+                        drives   = last_result.get("drives", {})
                         concepts = []
                     with self._ctrl_lock:
                         ctrl_snap = dict(self._controls)
