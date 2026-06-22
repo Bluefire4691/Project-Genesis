@@ -396,6 +396,18 @@ class GenesisVoice:
             reply = self._say_rules()
             return self._log_and_return(reply, set())
 
+        # ── Intent: M28 DecisionLog — "what have you been deciding?" ────────
+        if re.search(
+            r"what\s+have\s+you\s+been\s+(deciding|choosing|working\s+on)|"
+            r"recent\s+decisions?|what\s+did\s+you\s+decide|"
+            r"what\s+are\s+you\s+(deciding|choosing)|"
+            r"how\s+have\s+you\s+been\s+spending.*attention|"
+            r"what\s+choices?\s+(have\s+you|did\s+you)\s+made?",
+            text, re.I,
+        ):
+            reply = self._say_decisions()
+            return self._log_and_return(reply, set())
+
         # ── Intent: "how well do you know/understand X?" (M27 self-model) ─
         # An honest, measured self-assessment — coverage, confidence,
         # contested beliefs — never performed fluency.
@@ -1227,6 +1239,69 @@ class GenesisVoice:
                 f"About {pct}% of what they predict has since been independently "
                 f"confirmed — that's my calibration as a rule-author so far."
             )
+
+        return "  ".join(parts)
+
+    def _say_decisions(self) -> str:
+        """
+        Surface recent decisions from the M28 DecisionLog — what Genesis has
+        been choosing to do and what signals drove those choices.
+
+        Called when the user asks "what have you been deciding?" or similar.
+        """
+        log = getattr(self._brain, "decision_log", None)
+        if log is None:
+            return (
+                "I don't have an auditable decision record yet — "
+                "the deliberation layer isn't running."
+            )
+
+        try:
+            records = log.recent(n=6)
+        except Exception:
+            records = []
+
+        if not records:
+            return (
+                "I haven't logged any decisions yet — I'm still in the first "
+                "cycle.  Ask again once I've had a chance to learn something."
+            )
+
+        # Group by subsystem for a readable summary
+        by_sub: dict[str, list] = {}
+        for r in records:
+            by_sub.setdefault(r.subsystem, []).append(r)
+
+        parts = []
+
+        if "feeder" in by_sub:
+            topics = [
+                r.decision.removeprefix("learn about ")
+                for r in by_sub["feeder"]
+                if r.decision.startswith("learn about ")
+            ]
+            if topics:
+                parts.append(
+                    f"I decided to learn about {', '.join(topics[:3])}"
+                    + ("." if len(topics) <= 3 else f", and {len(topics)-3} more.")
+                )
+
+        if "reflection" in by_sub:
+            latest = by_sub["reflection"][0]
+            concept_part = latest.decision.replace("consolidate: salient concepts ", "")
+            parts.append(f"I reflected and found {concept_part} most salient.")
+
+        if "hypothesis" in by_sub:
+            latest = by_sub["hypothesis"][0]
+            parts.append(f"In generative reasoning: {latest.decision}.")
+
+        if "inference_programs" in by_sub:
+            latest = by_sub["inference_programs"][0]
+            parts.append(f"In rule authoring: {latest.decision}.")
+
+        if not parts:
+            latest = records[0]
+            parts.append(f"Most recently: {latest.decision} ({latest.subsystem}).")
 
         return "  ".join(parts)
 

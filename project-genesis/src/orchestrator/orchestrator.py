@@ -178,6 +178,13 @@ class Orchestrator:
         from cognition.self_model import SelfModel
         self.self_model = SelfModel(self)
 
+        # M28: Decision log — persistent, append-only record of what Genesis
+        # decided each cycle and what signals drove the choice.  Provides the
+        # auditable history behind "what have you been deciding?" and closes the
+        # gap between "locally adaptive" and "deciding."
+        from cognition.decision_log import DecisionLog
+        self.decision_log = DecisionLog(_conn)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -714,7 +721,40 @@ class Orchestrator:
         if not hasattr(self, "_feeder") or self._feeder is None:
             from ingestion.feeder import KnowledgeFeeder
             self._feeder = KnowledgeFeeder(self)
-        return self._feeder.run(n_topics=n_topics, verbose=verbose)
+        result = self._feeder.run(n_topics=n_topics, verbose=verbose)
+
+        # M28: log one decision per topic that yielded something
+        try:
+            succeeded = result.get("topics_succeeded") or result.get("topics_attempted") or []
+            added     = result.get("relations_added", 0)
+            drives_r  = ""
+            try:
+                ds = self.drives.summary()
+                drives_r = (f"hunger={ds['hunger']:.2f}, "
+                            f"wanting={ds['wanting']:+.2f}, "
+                            f"curiosity_directives={len(self._curiosity_directives)}")
+            except Exception:
+                pass
+            for topic in succeeded:
+                self.decision_log.record(
+                    subsystem="feeder",
+                    decision=f"learn about {topic}",
+                    rationale=drives_r or "self-directed curiosity",
+                    cycle=self.cycle_count,
+                )
+            if added and succeeded:
+                # Also record the aggregate yield so "what did you decide" can say
+                # how productive this fetch was.
+                self.decision_log.record(
+                    subsystem="feeder",
+                    decision=f"fetch added {added} associations across {len(succeeded)} topic(s)",
+                    rationale=drives_r or "self-directed curiosity",
+                    cycle=self.cycle_count,
+                )
+        except Exception as exc:
+            self.survival.resilience.error_log.log("fetch_knowledge.decision_log", exc)
+
+        return result
 
     def learn_about(self, concept: str, verbose: bool = False) -> dict:
         """
@@ -789,6 +829,25 @@ class Orchestrator:
         result = self.consolidation.consolidate(
             cycle=cycle or self.cycle_count, top_k=top_k
         )
+
+        # M28: record the reflection decision
+        try:
+            salient = result.get("salient", [])[:3]
+            concept_names = [
+                (s["concept"] if isinstance(s, dict) else str(s))
+                for s in salient
+            ]
+            self.decision_log.record(
+                subsystem="reflection",
+                decision=(
+                    f"consolidate: salient concepts [{', '.join(concept_names)}]"
+                    if concept_names else "consolidate"
+                ),
+                rationale=f"cycle={cycle or self.cycle_count}",
+                cycle=cycle or self.cycle_count,
+            )
+        except Exception as exc:
+            self.survival.resilience.error_log.log("reflect.decision_log.consolidate", exc)
         # M14: Calibrate Observer thresholds from accumulated behavioral history.
         # Runs after each reflection so calibration has the richest possible data —
         # the same history that consolidation just summarized.
@@ -842,6 +901,17 @@ class Orchestrator:
                         and len(self._curiosity_directives) < self._MAX_DIRECTIVES):
                     self._curiosity_directives[concept] = 0.80
             self._save_directives()
+            # M28: record hypothesis activity
+            if resolved > 0 or new_hyps > 0:
+                self.decision_log.record(
+                    subsystem="hypothesis",
+                    decision=(
+                        f"formed {new_hyps} hypothesis(es), resolved {resolved}"
+                        if new_hyps else f"resolved {resolved} hypothesis(es)"
+                    ),
+                    rationale=f"generative cognition pass at cycle {cycle or self.cycle_count}",
+                    cycle=cycle or self.cycle_count,
+                )
         except Exception as exc:
             self.survival.resilience.error_log.log("reflect.hypotheses", exc)
 
@@ -871,10 +941,32 @@ class Orchestrator:
             confirmed_deriv = self.programs.verify_derivations()
             if confirmed_deriv > 0 and self.verbose:
                 self._log(f"  ✅ {confirmed_deriv} program derivation(s) confirmed")
+            # M28: record inference-program activity
+            if new_progs > 0 or new_deriv > 0:
+                self.decision_log.record(
+                    subsystem="inference_programs",
+                    decision=(
+                        f"authored {new_progs} rule(s), derived {new_deriv} edge(s)"
+                    ),
+                    rationale=f"program mining at cycle {cycle or self.cycle_count}",
+                    cycle=cycle or self.cycle_count,
+                )
         except Exception as exc:
             self.survival.resilience.error_log.log("reflect.programs", exc)
 
         return result
+
+    def recent_decisions(self, n: int = 5) -> list:
+        """
+        Return the n most recent DecisionRecords (newest first).
+
+        M28 — the auditable history behind "what have you been deciding?"
+        Each record has: subsystem, decision, rationale, cycle_count, timestamp.
+        """
+        try:
+            return self.decision_log.recent(n)
+        except Exception:
+            return []
 
     def propose_research(self) -> str | None:
         """

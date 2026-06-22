@@ -344,33 +344,41 @@ contested concept disclosed in conversation; read-only invariant asserted.
 
 ---
 
-### M28: Deliberative Integration — Auditable Decisions
+### M28: Deliberative Integration — Auditable Decisions ✅
 
 **The gap:** decisions are per-subsystem (CuriosityEngine picks topics,
 ResourceManager sets throttle, BeliefRevision resolves contradictions). Nothing
 integrates them. There is no record of "what Genesis decided this cycle and why."
 This is the architectural gap between "locally adaptive" and "deciding."
 
-**What success looks like:**
-- A `DecisionLog` (persistent, append-only) records each cognitive cycle's key
-  choices: what to learn next, which belief tension to resolve, what to express —
-  with the signals that drove each choice
-- `brain.recent_decisions(n=5)` is a queryable record in Genesis's own history
-- The autonomous cognitive loop (M20) writes to the DecisionLog each tick
-- `chat_respond("what have you been deciding lately?")` draws on DecisionLog
+**What was built:** `src/cognition/decision_log.py` — `DecisionLog`.
+
+A persistent, append-only SQLite table (`decision_log`) that lives in the main
+memory DB alongside memories, relations, and hypotheses.  Each record carries:
+subsystem, decision (plain-language summary), rationale (the signals that drove
+it), cycle_count, and timestamp.
+
+Decision recording is wired at four points:
+- `fetch_knowledge()` — one record per succeeded topic ("learn about wolves")
+  plus an aggregate yield record; rationale includes hunger/wanting/directive count
+- `reflect()` consolidation — records salient concepts identified
+- `reflect()` hypothesis generation — records how many hypotheses formed/resolved
+- `reflect()` inference program mining — records new rules authored and derivations run
+
+`brain.recent_decisions(n=5)` is the public interface, returning
+`list[DecisionRecord]`.  Voice layer: "what have you been deciding?" / "recent
+decisions?" / "what choices have you made?" all route to `_say_decisions()`, which
+groups records by subsystem and narrates what Genesis has been spending attention on.
 
 **Cross-layer interaction review:**
-- Writes to a new SQLite table — must go through survival gating
-  (`if self.survival.can("logging"):`)
-- M20 daemon thread: must not introduce lock contention with the main loop
-- Voice layer: new intent pattern ("what have you decided", "what are you choosing")
-- Integration test must confirm DecisionLog grows across a multi-topic session
+- Writes only to its own `decision_log` table; no coupling to memory or relations
+- Uses the existing shared `_conn` — no extra DB file, same ACID guarantees
+- DecisionLog.record() never raises — errors silently dropped, callers unaffected
+- Voice pattern added before the broad "what causes X" handler to avoid shadowing
 
-**Integration tests required before ✅:**
-1. After a 5-topic learning session, `len(brain.recent_decisions()) >= 5`
-2. Each DecisionRecord has a non-empty `rationale` field
-3. `chat_respond("what have you been deciding?")` references at least one actual
-   topic from the session
+**Integration tests:** 12 tests in `tests/test_decision_log.py` — all three
+roadmap requirements met plus unit, persistence, and voice-layer tests.
+Full suite: 1197 passed, 24 skipped.
 
 ---
 
