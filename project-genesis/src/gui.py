@@ -11,11 +11,10 @@ Four-panel PyQt6 window:
 Run:
     python gui.py --resume --self-directed --speed 8 --batch 10
 
-Same thread model as ui.py:
-    - Cognition thread  : tight inner batch, never touches the network
-    - Fetcher thread    : web I/O only, isolated so network latency can't
-                          freeze the display or the cognition loop
-    - Qt main thread    : GUI only; receives updates via pyqtSignal
+Thin Qt renderer over the shared GenesisEngine (engine.py), which owns the
+cognition thread, the fetcher thread, the lock discipline, and every command.
+Engine callbacks arrive on background threads and are marshalled to the Qt
+main thread via pyqtSignal; this file only builds widgets and paints them.
 """
 
 import collections
@@ -23,7 +22,6 @@ import os
 import sys
 import time
 import threading
-from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -41,13 +39,10 @@ matplotlib.use("QtAgg")
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
+from engine import GenesisEngine, _SPEED_TABLE, add_common_args, boot_brain
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-
-_SPEED_TABLE = {
-    1: 0.500, 2: 0.200, 3: 0.100, 4: 0.050, 5: 0.020,
-    6: 0.010, 7: 0.005, 8: 0.001, 9: 0.000, 10: 0.000,
-}
 
 # Five biological-analog drives (all 0–1)
 _DRIVE_NAMES  = ["hunger", "anticipation", "frustration", "boredom", "dissonance"]
@@ -62,14 +57,9 @@ _DRIVE_COLORS = {
 _WANTING_COLOR = "#2ecc71"
 
 _GRAPH_LEN    = 120   # 2 min of history at 1 data-point / second
-_STATUS_HZ    = 1.0   # status updates pushed to UI per second
 
 
-class _Busy(Exception):
-    """Brain lock could not be acquired in time."""
-
-
-# ── Signal bridge (background threads → Qt main thread) ──────────────────────
+# ── Signal bridge (engine threads → Qt main thread) ───────────────────────────
 
 class _Bridge(QObject):
     genesis_said    = pyqtSignal(str)      # Genesis expressed something
@@ -147,42 +137,37 @@ class GenesisWindow(QMainWindow):
     def __init__(self, brain, self_directed: bool,
                  fetch_topics: int, initial_speed: int, initial_batch: int):
         super().__init__()
-        self._brain        = brain
-        self._self_directed = self_directed
-
-        self._brain_lock  = threading.RLock()
-        self._ctrl_lock   = threading.Lock()
-        self._stop_evt    = threading.Event()
-
-        try:
-            _mem = brain.memory._working.capacity
-        except Exception:
-            _mem = 5000
-
-        self._controls = {
-            "speed":        initial_speed,
-            "batch":        initial_batch,
-            "memory":       _mem,
-            "fetch_topics": fetch_topics,
-            "explore_flag": False,
-        }
-
-        self._fetch_topic: str = ""
-        self._last_cps: float  = 0.0
-        # User-activity signals — the fetcher defers while these are hot so
-        # chat commands never bounce off a lock held by a web fetch.
-        self._pending_cmds: int      = 0
-        self._last_typing:  float    = 0.0
+        self._last_cps: float = 0.0
+        # User-activity signals — the engine's fetcher defers while these are
+        # hot so chat commands never bounce off a lock held by a web fetch.
+        self._pending_cmds: int   = 0
+        self._last_typing:  float = 0.0
 
         self._bridge = _Bridge()
         self._bridge.genesis_said.connect(self._on_genesis)
         self._bridge.system_note.connect(self._on_system)
         self._bridge.status_update.connect(self._on_status)
 
-        self._build_ui(initial_speed, initial_batch, _mem, fetch_topics)
+        # The shared engine owns the cognition thread, the fetcher thread,
+        # the lock discipline, and every command — this window only renders.
+        # Bridge signals are thread-safe, so engine callbacks emit directly.
+        self._engine = GenesisEngine(
+            brain,
+            self_directed=self_directed,
+            fetch_topics=fetch_topics,
+            speed=initial_speed,
+            batch=initial_batch,
+            on_genesis=self._bridge.genesis_said.emit,
+            on_system=self._bridge.system_note.emit,
+            on_status=self._bridge.status_update.emit,
+            user_active=self._user_active,
+        )
 
-        threading.Thread(target=self._cognition_loop, daemon=True).start()
-        threading.Thread(target=self._fetcher_loop,   daemon=True).start()
+        ctrl = self._engine.snapshot_controls()
+        self._build_ui(ctrl["speed"], ctrl["batch"],
+                       ctrl["memory"], ctrl["fetch_topics"])
+
+        self._engine.start()
 
         # Greeting after the window is shown
         QTimer.singleShot(200, self._send_greeting)
@@ -456,34 +441,25 @@ class GenesisWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _chg_speed(self, v):
-        with self._ctrl_lock:
-            self._controls["speed"] = v
+        v = self._engine.set_speed(v)
         ms = _SPEED_TABLE.get(v, 0.001) * 1000
         self._speed_lbl.setText(f"Speed  {v}/10  ({ms:.0f} ms between batches)")
 
     def _chg_batch(self, v):
-        with self._ctrl_lock:
-            self._controls["batch"] = v
+        v = self._engine.set_batch(v)
         self._batch_lbl.setText(f"Batch  {v}")
 
     def _chg_mem(self, v):
-        with self._ctrl_lock:
-            self._controls["memory"] = v
-        try:
-            self._brain.memory._working.capacity = v
-        except Exception:
-            pass
+        v = self._engine.set_memory(v)
         note = "  ⚠ large" if v > 3000 else ""
         self._mem_lbl.setText(f"Memory  {v:,}{note}")
 
     def _chg_fetch(self, v):
-        with self._ctrl_lock:
-            self._controls["fetch_topics"] = v
+        v = self._engine.set_fetch_topics(v)
         self._fetch_lbl.setText(f"Fetch topics  {v}")
 
     def _do_explore(self):
-        with self._ctrl_lock:
-            self._controls["explore_flag"] = True
+        self._engine.explore()
         self._sys("Breaking topic fixation — new direction next batch.")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -506,173 +482,64 @@ class GenesisWindow(QMainWindow):
         self._user(raw)
         self._dispatch(raw)
 
-    @contextmanager
-    def _access(self, timeout: float = 2.5):
-        if not self._brain_lock.acquire(timeout=timeout):
-            raise _Busy
-        try:
-            yield
-        finally:
-            self._brain_lock.release()
-
     def _dispatch(self, raw: str):
-        if ":" in raw:
-            cmd, _, arg = raw.partition(":")
-            cmd, arg = cmd.strip().lstrip("/").lower(), arg.strip()
-        else:
-            parts = raw.lstrip("/").split(None, 1)
-            if not parts:          # input was all slashes — nothing to do
-                return
-            cmd   = parts[0].lower()
-            arg   = parts[1].strip() if len(parts) > 1 else ""
+        parsed = GenesisEngine.parse(raw)
+        if parsed is None:          # input was all slashes — nothing to do
+            return
+        cmd, arg = parsed
 
-        # Resource keywords only act as commands with a numeric (or empty)
-        # argument — "memory is fascinating" is conversation, "memory 800"
-        # is a command.
-        _numeric_arg = arg == "" or arg.isdigit()
-
-        # Quit
-        if cmd in ("quit", "exit", "q") and arg == "":
+        if GenesisEngine.is_quit(cmd, arg):
             self._sys("Saving and shutting down…")
-            self._stop_evt.set()
             # close() triggers closeEvent, which performs the save (waits
             # up to 30s for an in-flight fetch to release the brain lock).
             QTimer.singleShot(100, self.close)
             return
 
-        # Instant resource controls — no lock needed
-        if cmd == "speed" and _numeric_arg:
-            try:
-                self._speed_sl.setValue(max(1, min(10, int(arg))))
-            except ValueError:
-                self._sys("Usage: speed N  (1–10)")
+        # Instant resource controls — the engine setters clamp; the sliders
+        # are synced from the applied value so the display never lies.
+        if GenesisEngine.is_local(cmd, arg):
+            msg = self._engine.run_local(cmd, arg)
+            self._sync_sliders()
+            self._sys(msg)
             return
 
-        if cmd == "batch" and _numeric_arg:
-            try:
-                n = max(1, min(1000, int(arg)))
-                self._batch_sl.setValue(min(n, 500))
-                with self._ctrl_lock:
-                    self._controls["batch"] = n
-                self._batch_lbl.setText(f"Batch  {n}")
-            except ValueError:
-                self._sys("Usage: batch N")
-            return
-
-        if cmd == "memory" and arg.isdigit():
-            n = max(100, int(arg))
-            self._mem_sl.setValue(min(n, 5000))
-            self._chg_mem(n)
-            return
-
-        if cmd == "fetch" and arg.isdigit():
-            self._fetch_sl.setValue(max(1, min(10, int(arg))))
-            return
-
-        if cmd == "explore" and arg == "":
-            self._do_explore()
-            return
-
-        # Brain commands — worker thread so the UI stays live
+        # Brain commands — worker thread so the UI stays live.  The engine
+        # turns _Busy and errors into system events, so this never raises.
+        if cmd == "learn":
+            self._sys("Fetching topics…")
         self._pending_cmds += 1
         threading.Thread(target=self._run_cmd,
                          args=(cmd, arg, raw), daemon=True).start()
 
     def _run_cmd(self, cmd: str, arg: str, raw: str):
         try:
-            if cmd == "status":
-                with self._access():
-                    s = self._brain.full_status()
-                    d = self._brain.drives.summary()
-                with self._ctrl_lock:
-                    sp, bt = self._controls["speed"], self._controls["batch"]
-                self._bridge.genesis_said.emit(
-                    f"Cycle {s['cycles']:,}. "
-                    f"{s['memory']['total_stored']:,} memories, "
-                    f"{s.get('relations',{}).get('total_relations',0):,} associations. "
-                    f"Drives: {d['dominant']} {d['dominant_level']:.2f}, "
-                    f"wanting {d['wanting']:+.2f}. "
-                    f"Speed {sp}/10 × batch {bt} ({self._last_cps:.0f} cycles/s)."
-                )
-
-            elif cmd == "reflect":
-                self._bridge.system_note.emit("Reflecting…")
-                with self._access(timeout=15.0):
-                    rep = self._brain.reflect(cycle=self._brain.cycle_count)
-                self._bridge.genesis_said.emit(
-                    rep.get("summary") or "I reflected but nothing crystallised yet.")
-
-            elif cmd == "thoughts":
-                with self._access():
-                    latest = self._brain.latest_reflection()
-                self._bridge.genesis_said.emit(
-                    latest["summary"] if latest
-                    else "I haven't reflected yet. Type 'reflect'.")
-
-            elif cmd == "curiosity":
-                with self._access():
-                    report = self._brain.curiosity_report()
-                if report:
-                    topics = ", ".join(r["concept"] for r in report[:5])
-                    self._bridge.genesis_said.emit(
-                        f"I most want to understand: {topics}.")
+            for kind, text in self._engine.run_command(cmd, arg, raw):
+                if kind == "genesis":
+                    self._bridge.genesis_said.emit(text)
                 else:
-                    self._bridge.genesis_said.emit(
-                        "I haven't formed strong curiosity targets yet.")
-
-            elif cmd == "save":
-                with self._access(timeout=10.0):
-                    self._brain.save_session()
-                self._bridge.system_note.emit("Session saved.")
-
-            elif cmd == "learn" and (arg == "" or arg.isdigit()):
-                # "learn" / "learn 4" is a command; "learn something for me"
-                # is conversation and falls through to chat_respond below.
-                with self._ctrl_lock:
-                    n = int(arg) if arg.isdigit() else self._controls["fetch_topics"]
-                self._bridge.system_note.emit(f"Fetching {n} topics…")
-                with self._access(timeout=60.0):
-                    res = self._brain.fetch_knowledge(n_topics=n, verbose=False)
-                topics = _fetched_topics(res)
-                self._bridge.genesis_said.emit(
-                    f"I read about {', '.join(topics[:3])}."
-                    if topics else "Nothing new came back from that search.")
-
-            elif cmd == "relations" and arg:
-                with self._access():
-                    rels = self._brain.relations.query_subject(
-                        arg, min_confidence=0.3)
-                if rels:
-                    desc = "; ".join(
-                        f"{r['relation']} {r['object']} ({r['confidence']:.2f})"
-                        for r in rels[:5]
-                    )
-                    self._bridge.genesis_said.emit(f"{arg}: {desc}")
-                else:
-                    self._bridge.genesis_said.emit(
-                        f"No associations for '{arg}' yet.")
-
-            else:
-                with self._access():
-                    reply = self._brain.voice.chat_respond(raw)
-                self._bridge.genesis_said.emit(
-                    reply if reply else
-                    "I heard you. Still forming a response — "
-                    "try 'reflect' to help me consolidate."
-                )
-
-        except _Busy:
-            self._bridge.system_note.emit(
-                "Genesis is mid web-read — wait a moment, or use the sliders."
-            )
-        except Exception as exc:
-            self._bridge.system_note.emit(f"Error: {exc}")
-            try:
-                self._brain.survival.resilience.error_log.log("gui.run_cmd", exc)
-            except Exception:
-                pass
+                    self._bridge.system_note.emit(text)
         finally:
             self._pending_cmds = max(0, self._pending_cmds - 1)
+
+    def _sync_sliders(self):
+        """Reflect the engine's applied control values in the widgets."""
+        ctrl = self._engine.snapshot_controls()
+        for slider, value in ((self._speed_sl, ctrl["speed"]),
+                              (self._batch_sl, min(ctrl["batch"], 500)),
+                              (self._mem_sl,   min(ctrl["memory"], 5000)),
+                              (self._fetch_sl, min(ctrl["fetch_topics"], 10))):
+            slider.blockSignals(True)
+            slider.setValue(value)
+            slider.blockSignals(False)
+        # Labels are normally set by the slider callbacks; with signals
+        # blocked, refresh them explicitly.
+        ms = _SPEED_TABLE.get(ctrl["speed"], 0.001) * 1000
+        self._speed_lbl.setText(
+            f"Speed  {ctrl['speed']}/10  ({ms:.0f} ms between batches)")
+        self._batch_lbl.setText(f"Batch  {ctrl['batch']}")
+        note = "  ⚠ large" if ctrl["memory"] > 3000 else ""
+        self._mem_lbl.setText(f"Memory  {ctrl['memory']:,}{note}")
+        self._fetch_lbl.setText(f"Fetch topics  {ctrl['fetch_topics']}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Chat display (always on the main thread via signals)
@@ -768,229 +635,26 @@ class GenesisWindow(QMainWindow):
         )
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Background threads (identical logic to ui.py)
+    # Greeting (engine owns all background threads)
     # ─────────────────────────────────────────────────────────────────────────
 
     def _send_greeting(self):
         def _greet():
-            try:
-                with self._access(timeout=10.0):
-                    msg = self._brain.voice.wake_greeting()
-                self._bridge.genesis_said.emit(
-                    msg if msg else "I'm awake. Give me a moment to settle.")
-            except Exception:
-                self._bridge.genesis_said.emit(
-                    "I'm awake. Give me a moment to settle.")
+            self._bridge.genesis_said.emit(self._engine.greeting())
         threading.Thread(target=_greet, daemon=True).start()
-
-    def _cognition_loop(self):
-        brain = self._brain
-
-        if brain.curriculum.current_stage.value >= 4:
-            from curriculum.adaptive_stream import AdaptiveStream
-            stream = AdaptiveStream(brain)
-        else:
-            from curriculum.open_stage import DataStream
-            stream = DataStream()
-
-        try:
-            from output.channel import NullChannel
-            brain.voice.set_channel(NullChannel())
-        except Exception:
-            pass
-
-        cycles       = 0
-        last_reflect = 0
-        last_save    = time.time()
-        last_result  = {}
-        last_status  = 0.0
-
-        _tput_t0      = time.perf_counter()
-        _tput_count   = 0
-        cyc_per_sec   = 0.0
-        _last_err_log = 0.0
-
-        _REFLECT_EVERY = 400
-        _AUTOSAVE      = 120.0
-
-        while not self._stop_evt.is_set():
-            try:
-                with self._ctrl_lock:
-                    speed      = self._controls["speed"]
-                    batch_size = max(1, self._controls["batch"])
-                    do_explore = self._controls["explore_flag"]
-                    if do_explore:
-                        self._controls["explore_flag"] = False
-
-                cycle_sleep = _SPEED_TABLE.get(speed, 0.001)
-
-                if do_explore:
-                    try:
-                        with self._brain_lock:
-                            brain._curiosity_directives.clear()
-                            brain._save_directives()
-                    except Exception:
-                        pass
-                    self._fetch_topic = ""
-
-                for _ in range(batch_size):
-                    if self._stop_evt.is_set():
-                        break
-                    try:
-                        with self._brain_lock:
-                            item        = stream.next()
-                            last_result = brain.process_input(
-                                item["type"], item["data"])
-                    except Exception as exc:
-                        # Errors are data — route to the error log, but at
-                        # most once per second so a persistent failure can't
-                        # flood it from a tight loop.
-                        if (time.monotonic() - _last_err_log) >= 1.0:
-                            _last_err_log = time.monotonic()
-                            try:
-                                brain.survival.resilience.error_log.log(
-                                    "gui.cognition_loop", exc)
-                            except Exception:
-                                pass
-                        continue
-                    cycles      += 1
-                    _tput_count += 1
-
-                now = time.perf_counter()
-                if (now - _tput_t0) >= 5.0:
-                    cyc_per_sec = _tput_count / (now - _tput_t0)
-                    _tput_t0    = now
-                    _tput_count = 0
-
-                # Spontaneous expression
-                try:
-                    if cycles % 40 < batch_size:
-                        with self._brain_lock:
-                            expr = brain.drives.expressive_state()
-                        if expr:
-                            self._bridge.genesis_said.emit(expr)
-                except Exception:
-                    pass
-
-                # Status — throttled to _STATUS_HZ
-                # Call drives.summary() directly: the orchestrator's process_input
-                # result only carries the M34 seed drives (wanting/liking/empowerment),
-                # not the five biological drives (hunger/frustration/boredom/dissonance).
-                wall = time.monotonic()
-                if (wall - last_status) >= (1.0 / _STATUS_HZ):
-                    last_status = wall
-                    try:
-                        with self._brain_lock:
-                            drives   = brain.drives.summary()
-                            concepts = list(
-                                brain.memory._working._context_terms[:16])
-                    except Exception:
-                        drives   = last_result.get("drives", {})
-                        concepts = []
-                    with self._ctrl_lock:
-                        ctrl_snap = dict(self._controls)
-                    self._bridge.status_update.emit({
-                        "cycle":       brain.cycle_count,
-                        "drives":      drives,
-                        "topic":       self._fetch_topic,
-                        "controls":    ctrl_snap,
-                        "cyc_per_sec": cyc_per_sec,
-                        "concepts":    concepts,
-                    })
-
-                # Periodic reflection
-                if (cycles - last_reflect) >= _REFLECT_EVERY:
-                    try:
-                        with self._brain_lock:
-                            rep = brain.reflect(cycle=cycles)
-                        summary = rep.get("summary", "")
-                        if summary:
-                            self._bridge.genesis_said.emit(summary)
-                    except Exception:
-                        pass
-                    last_reflect = cycles
-
-                # Periodic auto-save
-                if (time.time() - last_save) >= _AUTOSAVE:
-                    try:
-                        with self._brain_lock:
-                            brain.save_session()
-                        last_save = time.time()
-                    except Exception:
-                        pass
-
-                if cycle_sleep > 0:
-                    time.sleep(cycle_sleep)
-
-            except Exception:
-                time.sleep(0.1)
-
-    def _fetcher_loop(self):
-        if not self._self_directed:
-            return
-        self._stop_evt.wait(8.0)
-        while not self._stop_evt.is_set():
-            # Defer while the user is typing or a command is in flight —
-            # keep the brain lock free so conversation stays snappy.
-            if self._user_active():
-                self._stop_evt.wait(1.5)
-                continue
-            with self._ctrl_lock:
-                n_fetch = self._controls["fetch_topics"]
-            try:
-                with self._brain_lock:
-                    res = self._brain.fetch_knowledge(
-                        n_topics=n_fetch, verbose=False)
-                topics = _fetched_topics(res)
-                added  = res.get("relations_added", 0)
-                if topics:
-                    self._fetch_topic = topics[0]
-                    msg = f"Read about {', '.join(topics[:3])}"
-                    if added:
-                        msg += f"  (+{added} associations)"
-                    self._bridge.system_note.emit(msg)
-            except Exception as exc:
-                try:
-                    self._brain.survival.resilience.error_log.log(
-                        "gui.fetcher_loop", exc)
-                except Exception:
-                    pass
-            self._stop_evt.wait(20.0)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Close
     # ─────────────────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
-        self._stop_evt.set()
-        # Wait up to 30s — an in-flight web fetch can hold the lock for tens
-        # of seconds, and skipping the save silently would lose up to 120s
-        # (the autosave interval) of memories and relations.
-        saved = False
-        try:
-            if self._brain_lock.acquire(timeout=30.0):
-                try:
-                    self._brain.save_session()
-                    saved = True
-                finally:
-                    self._brain_lock.release()
-        except Exception as exc:
-            try:
-                self._brain.survival.resilience.error_log.log("gui.close_save", exc)
-            except Exception:
-                pass
-        if not saved:
+        # engine.stop waits up to 30s — an in-flight web fetch can hold the
+        # lock for tens of seconds, and skipping the save silently would lose
+        # up to 120s (the autosave interval) of memories and relations.
+        if not self._engine.stop(timeout=30.0):
             print("WARNING: could not acquire brain lock — session state since "
                   "the last autosave (up to 2 minutes) was not saved.")
         event.accept()
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _fetched_topics(res: dict) -> list:
-    return (res.get("topics_succeeded")
-            or res.get("topics_attempted")
-            or [])
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -999,31 +663,13 @@ if __name__ == "__main__":
     import argparse
 
     ap = argparse.ArgumentParser(description="Genesis Desktop GUI")
-    ap.add_argument("--resume",        action="store_true")
-    ap.add_argument("--self-directed", action="store_true")
-    ap.add_argument("--fetch-topics",  type=int, default=2)
-    ap.add_argument("--db",            default=None)
-    ap.add_argument("--speed",         type=int, default=8)
-    ap.add_argument("--batch",         type=int, default=10)
+    add_common_args(ap)
     args = ap.parse_args()
 
     app = QApplication(sys.argv)
     app.setApplicationName("Genesis")
 
-    from orchestrator.orchestrator import Orchestrator
-
-    brain = Orchestrator(verbose=False, db_path=args.db, resume=args.resume)
-
-    if not args.resume:
-        print("Building foundation — about a minute…")
-        from curriculum.open_stage import advance_to_open
-        advance_to_open(brain)
-        brain.save_session()
-        print("Foundation complete.")
-    else:
-        if brain.curriculum.current_stage.value < 4:
-            from curriculum.open_stage import advance_to_open
-            advance_to_open(brain)
+    brain = boot_brain(args)
 
     win = GenesisWindow(
         brain,

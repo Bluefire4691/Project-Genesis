@@ -955,6 +955,17 @@ class Orchestrator:
 
         return result
 
+    def set_working_capacity(self, n: int) -> int:
+        """
+        Adjust working-memory capacity at runtime (live resource control).
+
+        Returns the applied value.  The memory subsystem owns the eviction
+        semantics; callers must not reach into memory._working directly.
+        """
+        n = max(100, int(n))
+        self.memory._working.capacity = n
+        return n
+
     def recent_decisions(self, n: int = 5) -> list:
         """
         Return the n most recent DecisionRecords (newest first).
