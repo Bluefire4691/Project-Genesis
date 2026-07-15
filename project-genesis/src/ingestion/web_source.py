@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from ingestion.browser import GenesisBrowser, _is_blocked_domain
+from ingestion.browser import GenesisBrowser
 
 if TYPE_CHECKING:
     from orchestrator.orchestrator import Orchestrator
@@ -86,7 +86,7 @@ class WebSource:
             url = hit.get("href", "")
             if not url:
                 continue
-            if _is_blocked_domain(url):
+            if self._browser.is_blocked(url):
                 continue
             if self._browser.already_visited(url):
                 continue
@@ -114,7 +114,7 @@ class WebSource:
                 if followed >= _MAX_FOLLOW_LINKS or score < _FOLLOW_THRESHOLD:
                     break
                 url = link["href"]
-                if _is_blocked_domain(url):
+                if self._browser.is_blocked(url):
                     continue
                 if self._browser.already_visited(url):
                     continue

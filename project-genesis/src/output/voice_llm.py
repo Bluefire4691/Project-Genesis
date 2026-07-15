@@ -252,6 +252,18 @@ class GenesisVoiceLLM:
         except Exception:
             pass
 
+        # ── Recent decisions (M28) ─────────────────────────────────────
+        # Grounds "what have you been deciding?" in the actual DecisionLog
+        # rather than letting the model improvise.
+        try:
+            decisions = self._brain.recent_decisions(n=5)
+            if decisions:
+                lines = [f"- [{d.subsystem}] {d.decision}" for d in decisions]
+                sections.append("RECENT DECISIONS (newest first):\n"
+                                + "\n".join(lines))
+        except Exception:
+            pass
+
         return "\n\n".join(sections) if sections else "(no state available)"
 
     # ------------------------------------------------------------------

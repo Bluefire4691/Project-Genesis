@@ -40,13 +40,21 @@ class DecisionLog:
     Persistent append-only log of Genesis's cognitive decisions.
 
     Uses the shared memory DB connection — same DB, same ACID guarantees,
-    no additional files.  record() never raises; if the DB is unavailable the
-    decision is silently dropped (errors are data but we must not crash callers).
+    no additional files.  record() never raises, but failures are routed to
+    the survival error log (errors are data, not silence).
     """
 
-    def __init__(self, conn) -> None:
+    def __init__(self, conn, error_log=None) -> None:
         self._conn = conn
+        self._error_log = error_log
         self._init_schema()
+
+    def _log_error(self, label: str, exc: Exception) -> None:
+        if self._error_log is not None:
+            try:
+                self._error_log.log(label, exc)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Schema
@@ -75,7 +83,7 @@ class DecisionLog:
 
     def record(self, subsystem: str, decision: str,
                rationale: str = "", cycle: int = 0) -> None:
-        """Append one record.  Never raises."""
+        """Append one record.  Never raises; failures go to the error log."""
         try:
             self._conn.execute(
                 """INSERT INTO decision_log
@@ -84,8 +92,8 @@ class DecisionLog:
                 (time.time(), subsystem, decision, rationale, cycle),
             )
             self._conn.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_error("decision_log.record", exc)
 
     # ------------------------------------------------------------------
     # Read
@@ -108,7 +116,8 @@ class DecisionLog:
                 )
                 for r in rows
             ]
-        except Exception:
+        except Exception as exc:
+            self._log_error("decision_log.recent", exc)
             return []
 
     def count(self) -> int:
@@ -117,5 +126,6 @@ class DecisionLog:
             return self._conn.execute(
                 "SELECT COUNT(*) FROM decision_log"
             ).fetchone()[0]
-        except Exception:
+        except Exception as exc:
+            self._log_error("decision_log.count", exc)
             return 0

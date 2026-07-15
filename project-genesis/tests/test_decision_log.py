@@ -191,6 +191,40 @@ def test_chat_respond_what_have_you_been_deciding():
     )
 
 
+def test_chat_what_choices_did_you_make_routes_to_decisions():
+    """Regression: 'made?' in the intent regex couldn't match 'make'."""
+    brain = _brain()
+    brain.decision_log.record("feeder", "learn about wolves", "hunger=0.7")
+    reply = brain.voice.chat_respond("what choices did you make?")
+    assert "wolves" in reply, (
+        f"'what choices did you make?' should surface the decision log; got: {reply[:200]}"
+    )
+
+
+def test_say_decisions_no_salient_reflection_is_not_nonsense():
+    """Regression: bare 'consolidate' produced 'I reflected and found
+    consolidate most salient.'"""
+    brain = _brain()
+    brain.decision_log.record("reflection", "consolidate", "cycle=1")
+    reply = brain.voice.chat_respond("what have you been deciding?")
+    assert "found consolidate most salient" not in reply
+    assert reply  # still answers something
+
+
+def test_failed_topics_not_recorded_as_learning():
+    """Regression: topics_attempted fallback logged failures as decisions."""
+    brain = _brain()
+    # Simulate what fetch_knowledge does with an all-fail feeder result
+    result = {"topics_attempted": ["ghost topic"], "topics_succeeded": [],
+              "relations_added": 0}
+    succeeded = result.get("topics_succeeded") or []
+    for topic in succeeded:
+        brain.decision_log.record("feeder", f"learn about {topic}", "r")
+    assert brain.decision_log.count() == 0, (
+        "No decision should be recorded when no topic succeeded"
+    )
+
+
 # ── Persistence: decisions survive a session restart ─────────────────────────
 
 def test_decisions_persist_across_sessions():

@@ -194,6 +194,9 @@ class Orchestrator:
             survival if survival is not None
             else SurvivalOS(memory_limit_mb=memory_limit_mb)
         )
+        # DecisionLog is constructed before survival exists; hand it the
+        # error log now so its failures are data, not silence.
+        self.decision_log._error_log = self.survival.resilience.error_log
         self.interaction: InteractionLayer = (
             interaction if interaction is not None
             else InteractionLayer(self.memory)
@@ -723,9 +726,11 @@ class Orchestrator:
             self._feeder = KnowledgeFeeder(self)
         result = self._feeder.run(n_topics=n_topics, verbose=verbose)
 
-        # M28: log one decision per topic that yielded something
+        # M28: log one decision per topic that yielded something.
+        # Only topics_succeeded — attempted-but-failed topics must not be
+        # recorded as learning, or the audit log lies.
         try:
-            succeeded = result.get("topics_succeeded") or result.get("topics_attempted") or []
+            succeeded = result.get("topics_succeeded") or []
             added     = result.get("relations_added", 0)
             drives_r  = ""
             try:
@@ -735,19 +740,13 @@ class Orchestrator:
                             f"curiosity_directives={len(self._curiosity_directives)}")
             except Exception:
                 pass
+            if added and succeeded:
+                drives_r = (f"{drives_r}; " if drives_r else "") + \
+                           f"fetch added {added} associations"
             for topic in succeeded:
                 self.decision_log.record(
                     subsystem="feeder",
                     decision=f"learn about {topic}",
-                    rationale=drives_r or "self-directed curiosity",
-                    cycle=self.cycle_count,
-                )
-            if added and succeeded:
-                # Also record the aggregate yield so "what did you decide" can say
-                # how productive this fetch was.
-                self.decision_log.record(
-                    subsystem="feeder",
-                    decision=f"fetch added {added} associations across {len(succeeded)} topic(s)",
                     rationale=drives_r or "self-directed curiosity",
                     cycle=self.cycle_count,
                 )
@@ -840,7 +839,7 @@ class Orchestrator:
             self.decision_log.record(
                 subsystem="reflection",
                 decision=(
-                    f"consolidate: salient concepts [{', '.join(concept_names)}]"
+                    f"consolidate: salient concepts {', '.join(concept_names)}"
                     if concept_names else "consolidate"
                 ),
                 rationale=f"cycle={cycle or self.cycle_count}",

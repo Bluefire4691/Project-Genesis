@@ -19,10 +19,26 @@ if /i not "%CONFIRM%"=="YES" (
     exit /b 0
 )
 
+cd /d "%~dp0project-genesis"
+
+:: Verify GUI dependencies BEFORE touching the memory DB — never wipe
+:: Genesis's mind and then fail to start.
+python -c "import PyQt6, matplotlib" >nul 2>&1 || (
+    echo  Installing desktop GUI dependencies ^(PyQt6 + matplotlib^)...
+    pip install PyQt6 matplotlib
+)
+python -c "import PyQt6, matplotlib" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo  ERROR: could not install PyQt6/matplotlib. Nothing was deleted.
+    echo  Run: pip install PyQt6 matplotlib   and try again.
+    echo.
+    pause
+    exit /b 1
+)
+
 echo.
 echo  Clearing Genesis memory...
-
-cd /d "%~dp0project-genesis"
 
 :: Remove the database files
 if exist data\genesis_memory.db (

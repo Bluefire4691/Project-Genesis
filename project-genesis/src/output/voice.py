@@ -402,7 +402,7 @@ class GenesisVoice:
             r"recent\s+decisions?|what\s+did\s+you\s+decide|"
             r"what\s+are\s+you\s+(deciding|choosing)|"
             r"how\s+have\s+you\s+been\s+spending.*attention|"
-            r"what\s+choices?\s+(have\s+you|did\s+you)\s+made?",
+            r"what\s+choices?\s+(have\s+you|did\s+you)\s+(made|make)",
             text, re.I,
         ):
             reply = self._say_decisions()
@@ -1281,15 +1281,18 @@ class GenesisVoice:
                 if r.decision.startswith("learn about ")
             ]
             if topics:
-                parts.append(
-                    f"I decided to learn about {', '.join(topics[:3])}"
-                    + ("." if len(topics) <= 3 else f", and {len(topics)-3} more.")
-                )
+                shown = self._english_list(topics[:3])
+                more  = f", and {len(topics) - 3} more" if len(topics) > 3 else ""
+                parts.append(f"I decided to learn about {shown}{more}.")
 
         if "reflection" in by_sub:
             latest = by_sub["reflection"][0]
-            concept_part = latest.decision.replace("consolidate: salient concepts ", "")
-            parts.append(f"I reflected and found {concept_part} most salient.")
+            concept_part = latest.decision.removeprefix(
+                "consolidate: salient concepts ").strip("[]")
+            if concept_part and concept_part != "consolidate":
+                parts.append(f"I reflected and found {concept_part} most salient.")
+            else:
+                parts.append("I ran a consolidation pass.")
 
         if "hypothesis" in by_sub:
             latest = by_sub["hypothesis"][0]

@@ -19,7 +19,6 @@ Same thread model as ui.py:
 """
 
 import collections
-import html
 import os
 import sys
 import time
@@ -32,11 +31,10 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter,
     QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QLineEdit, QPushButton, QSlider, QProgressBar,
-    QListWidget, QListWidgetItem, QGroupBox, QStatusBar,
-    QFrame, QSizePolicy,
+    QListWidget, QGroupBox, QStatusBar,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import QColor, QTextCharFormat, QTextCursor
 
 import matplotlib
 matplotlib.use("QtAgg")
@@ -108,7 +106,8 @@ class _RollingPlot(FigureCanvasQTAgg):
         if y_range:
             ax.set_ylim(*y_range)
 
-        self._ax   = ax
+        self._ax          = ax
+        self._fixed_range = y_range is not None
         self._data : dict[str, collections.deque] = {}
         self._lines: dict[str, object] = {}
 
@@ -133,8 +132,11 @@ class _RollingPlot(FigureCanvasQTAgg):
                 continue
             self._data[name].append(val)
             self._lines[name].set_ydata(list(self._data[name]))
-        self._ax.relim()
-        self._ax.autoscale_view(scalex=False)
+        # A fixed-range axis never needs rescaling — skip the per-push
+        # relim/autoscale over every series.
+        if not self._fixed_range:
+            self._ax.relim()
+            self._ax.autoscale_view(scalex=False)
         self.draw_idle()
 
 
@@ -167,6 +169,10 @@ class GenesisWindow(QMainWindow):
 
         self._fetch_topic: str = ""
         self._last_cps: float  = 0.0
+        # User-activity signals — the fetcher defers while these are hot so
+        # chat commands never bounce off a lock held by a web fetch.
+        self._pending_cmds: int      = 0
+        self._last_typing:  float    = 0.0
 
         self._bridge = _Bridge()
         self._bridge.genesis_said.connect(self._on_genesis)
@@ -226,6 +232,9 @@ class GenesisWindow(QMainWindow):
 
         self._chat = QTextEdit()
         self._chat.setReadOnly(True)
+        # Cap the document so an overnight self-directed run can't grow the
+        # chat history without bound (old blocks are dropped automatically).
+        self._chat.document().setMaximumBlockCount(2000)
         self._chat.setStyleSheet(
             "background:#090916; color:#c8d0e0;"
             " font-family:'Consolas','Courier New',monospace; font-size:12px;"
@@ -244,6 +253,7 @@ class GenesisWindow(QMainWindow):
             " padding:7px 10px; font-size:12px;"
         )
         self._input.returnPressed.connect(self._send)
+        self._input.textChanged.connect(self._note_typing)
         row.addWidget(self._input)
 
         send = QPushButton("Send")
@@ -480,6 +490,14 @@ class GenesisWindow(QMainWindow):
     # Input / command handling
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _note_typing(self):
+        self._last_typing = time.monotonic()
+
+    def _user_active(self) -> bool:
+        """True if a command is in flight or the user typed recently."""
+        return (self._pending_cmds > 0
+                or (time.monotonic() - self._last_typing) < 5.0)
+
     def _send(self):
         raw = self._input.text().strip()
         if not raw:
@@ -503,25 +521,34 @@ class GenesisWindow(QMainWindow):
             cmd, arg = cmd.strip().lstrip("/").lower(), arg.strip()
         else:
             parts = raw.lstrip("/").split(None, 1)
+            if not parts:          # input was all slashes — nothing to do
+                return
             cmd   = parts[0].lower()
             arg   = parts[1].strip() if len(parts) > 1 else ""
 
+        # Resource keywords only act as commands with a numeric (or empty)
+        # argument — "memory is fascinating" is conversation, "memory 800"
+        # is a command.
+        _numeric_arg = arg == "" or arg.isdigit()
+
         # Quit
-        if cmd in ("quit", "exit", "q"):
+        if cmd in ("quit", "exit", "q") and arg == "":
             self._sys("Saving and shutting down…")
             self._stop_evt.set()
-            QTimer.singleShot(1800, self.close)
+            # close() triggers closeEvent, which performs the save (waits
+            # up to 30s for an in-flight fetch to release the brain lock).
+            QTimer.singleShot(100, self.close)
             return
 
         # Instant resource controls — no lock needed
-        if cmd == "speed":
+        if cmd == "speed" and _numeric_arg:
             try:
                 self._speed_sl.setValue(max(1, min(10, int(arg))))
             except ValueError:
                 self._sys("Usage: speed N  (1–10)")
             return
 
-        if cmd == "batch":
+        if cmd == "batch" and _numeric_arg:
             try:
                 n = max(1, min(1000, int(arg)))
                 self._batch_sl.setValue(min(n, 500))
@@ -532,27 +559,22 @@ class GenesisWindow(QMainWindow):
                 self._sys("Usage: batch N")
             return
 
-        if cmd == "memory":
-            try:
-                n = max(100, int(arg))
-                self._mem_sl.setValue(min(n, 5000))
-                self._chg_mem(n)
-            except ValueError:
-                self._sys("Usage: memory N")
+        if cmd == "memory" and arg.isdigit():
+            n = max(100, int(arg))
+            self._mem_sl.setValue(min(n, 5000))
+            self._chg_mem(n)
             return
 
-        if cmd == "fetch":
-            try:
-                self._fetch_sl.setValue(max(1, min(10, int(arg))))
-            except ValueError:
-                self._sys("Usage: fetch N")
+        if cmd == "fetch" and arg.isdigit():
+            self._fetch_sl.setValue(max(1, min(10, int(arg))))
             return
 
-        if cmd == "explore":
+        if cmd == "explore" and arg == "":
             self._do_explore()
             return
 
         # Brain commands — worker thread so the UI stays live
+        self._pending_cmds += 1
         threading.Thread(target=self._run_cmd,
                          args=(cmd, arg, raw), daemon=True).start()
 
@@ -603,7 +625,9 @@ class GenesisWindow(QMainWindow):
                     self._brain.save_session()
                 self._bridge.system_note.emit("Session saved.")
 
-            elif cmd == "learn":
+            elif cmd == "learn" and (arg == "" or arg.isdigit()):
+                # "learn" / "learn 4" is a command; "learn something for me"
+                # is conversation and falls through to chat_respond below.
                 with self._ctrl_lock:
                     n = int(arg) if arg.isdigit() else self._controls["fetch_topics"]
                 self._bridge.system_note.emit(f"Fetching {n} topics…")
@@ -643,6 +667,12 @@ class GenesisWindow(QMainWindow):
             )
         except Exception as exc:
             self._bridge.system_note.emit(f"Error: {exc}")
+            try:
+                self._brain.survival.resilience.error_log.log("gui.run_cmd", exc)
+            except Exception:
+                pass
+        finally:
+            self._pending_cmds = max(0, self._pending_cmds - 1)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Chat display (always on the main thread via signals)
@@ -686,8 +716,7 @@ class GenesisWindow(QMainWindow):
     def _on_system(self, text: str):
         self._sys(text)
 
-    def _on_status(self, st: object):
-        st = st  # type: dict
+    def _on_status(self, st: dict):
         drives   = st.get("drives", {})
         cps      = st.get("cyc_per_sec", 0.0)
         cycle    = st.get("cycle", 0)
@@ -714,8 +743,9 @@ class GenesisWindow(QMainWindow):
             self._drive_bars[name].setValue(pct)
             self._drive_lbls[name].setText(f"{raw_val:.2f}")
 
-        # Wanting bar (separate — signed value)
-        want_pct = min(100, max(0, int(wanting_raw * 100)))
+        # Wanting bar (signed −1→+1, remapped like the trend chart:
+        # empty = −1, half = 0, full = +1 — so negatives stay visible)
+        want_pct = min(100, max(0, int((wanting_raw * 0.5 + 0.5) * 100)))
         self._drive_bars["wanting"].setValue(want_pct)
         self._drive_lbls["wanting"].setText(f"{wanting_raw:+.3f}")
 
@@ -775,9 +805,10 @@ class GenesisWindow(QMainWindow):
         last_result  = {}
         last_status  = 0.0
 
-        _tput_t0    = time.perf_counter()
-        _tput_count = 0
-        cyc_per_sec = 0.0
+        _tput_t0      = time.perf_counter()
+        _tput_count   = 0
+        cyc_per_sec   = 0.0
+        _last_err_log = 0.0
 
         _REFLECT_EVERY = 400
         _AUTOSAVE      = 120.0
@@ -810,7 +841,17 @@ class GenesisWindow(QMainWindow):
                             item        = stream.next()
                             last_result = brain.process_input(
                                 item["type"], item["data"])
-                    except Exception:
+                    except Exception as exc:
+                        # Errors are data — route to the error log, but at
+                        # most once per second so a persistent failure can't
+                        # flood it from a tight loop.
+                        if (time.monotonic() - _last_err_log) >= 1.0:
+                            _last_err_log = time.monotonic()
+                            try:
+                                brain.survival.resilience.error_log.log(
+                                    "gui.cognition_loop", exc)
+                            except Exception:
+                                pass
                         continue
                     cycles      += 1
                     _tput_count += 1
@@ -889,6 +930,11 @@ class GenesisWindow(QMainWindow):
             return
         self._stop_evt.wait(8.0)
         while not self._stop_evt.is_set():
+            # Defer while the user is typing or a command is in flight —
+            # keep the brain lock free so conversation stays snappy.
+            if self._user_active():
+                self._stop_evt.wait(1.5)
+                continue
             with self._ctrl_lock:
                 n_fetch = self._controls["fetch_topics"]
             try:
@@ -903,8 +949,12 @@ class GenesisWindow(QMainWindow):
                     if added:
                         msg += f"  (+{added} associations)"
                     self._bridge.system_note.emit(msg)
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    self._brain.survival.resilience.error_log.log(
+                        "gui.fetcher_loop", exc)
+                except Exception:
+                    pass
             self._stop_evt.wait(20.0)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -913,14 +963,25 @@ class GenesisWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._stop_evt.set()
+        # Wait up to 30s — an in-flight web fetch can hold the lock for tens
+        # of seconds, and skipping the save silently would lose up to 120s
+        # (the autosave interval) of memories and relations.
+        saved = False
         try:
-            if self._brain_lock.acquire(timeout=5.0):
+            if self._brain_lock.acquire(timeout=30.0):
                 try:
                     self._brain.save_session()
+                    saved = True
                 finally:
                     self._brain_lock.release()
-        except Exception:
-            pass
+        except Exception as exc:
+            try:
+                self._brain.survival.resilience.error_log.log("gui.close_save", exc)
+            except Exception:
+                pass
+        if not saved:
+            print("WARNING: could not acquire brain lock — session state since "
+                  "the last autosave (up to 2 minutes) was not saved.")
         event.accept()
 
 

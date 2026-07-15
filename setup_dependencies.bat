@@ -25,9 +25,9 @@ if errorlevel 1 (
 )
 
 echo  Step 1 of 3 - Installing packages...
-echo  (spacy, trafilatura, ddgs, rich, psutil)
+echo  (spacy, trafilatura, ddgs, rich, psutil, PyQt6, matplotlib)
 echo.
-pip install spacy trafilatura ddgs rich psutil
+pip install spacy trafilatura ddgs rich psutil PyQt6 matplotlib
 if errorlevel 1 (
     echo.
     echo  WARNING: Some packages may not have installed cleanly.
@@ -54,6 +54,8 @@ echo.
 python -c "import spacy; nlp = spacy.load('en_core_web_sm'); print('  spaCy OK -', spacy.__version__)" 2>nul || echo   spaCy: not available (Genesis will use fallback)
 python -c "import trafilatura; print('  trafilatura OK -', trafilatura.__version__)" 2>nul || echo   trafilatura: not available
 python -c "from ddgs import DDGS; print('  ddgs OK')" 2>nul || python -c "from duckduckgo_search import DDGS; print('  duckduckgo_search OK')" 2>nul || echo   web search: not available
+python -c "import PyQt6; print('  PyQt6 OK')" 2>nul || echo   PyQt6: not available (desktop GUI will not start)
+python -c "import matplotlib; print('  matplotlib OK -', matplotlib.__version__)" 2>nul || echo   matplotlib: not available (no live graphs)
 
 echo.
 echo  ==========================================

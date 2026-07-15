@@ -218,6 +218,9 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
         _tput_t0    = time.perf_counter()
         _tput_count = 0
         cyc_per_sec = 0.0
+        _last_status_calc = 0.0
+        _drives_snapshot: dict = {}
+        _last_err_log = 0.0
 
         _REFLECT_EVERY = 400
         _AUTOSAVE      = 120.0
@@ -258,7 +261,16 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
                         with brain_lock:
                             item        = stream.next()
                             last_result = brain.process_input(item["type"], item["data"])
-                    except Exception:
+                    except Exception as exc:
+                        # Errors are data — log at most once per second so a
+                        # persistent failure can't flood from a tight loop.
+                        if (time.monotonic() - _last_err_log) >= 1.0:
+                            _last_err_log = time.monotonic()
+                            try:
+                                brain.survival.resilience.error_log.log(
+                                    "ui.cognition_loop", exc)
+                            except Exception:
+                                pass
                         continue
                     cycles      += 1
                     _tput_count += 1
@@ -279,8 +291,17 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
                 except Exception:
                     pass
 
-                # Status
-                drives = last_result.get("drives", {})
+                # Status — drives come from drives.summary(), not from the
+                # process_input result (which only carries the M34 seed
+                # drives, not the five biological drives). Throttled to 1/s.
+                if (time.monotonic() - _last_status_calc) >= 1.0:
+                    _last_status_calc = time.monotonic()
+                    try:
+                        with brain_lock:
+                            _drives_snapshot = brain.drives.summary()
+                    except Exception:
+                        _drives_snapshot = last_result.get("drives", {})
+                drives = _drives_snapshot
                 try:
                     status_q.get_nowait()
                 except queue.Empty:
@@ -353,8 +374,12 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
                     if added:
                         msg += f"  (+{added} associations)"
                     expression_q.put(("status", msg))
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    brain.survival.resilience.error_log.log(
+                        "ui.fetcher_loop", exc)
+                except Exception:
+                    pass
             # Space fetches out so cognition gets long uninterrupted runs.
             stop_evt.wait(20.0)
 
@@ -427,8 +452,17 @@ def run(brain, self_directed: bool = False, fetch_topics: int = 2,
                     cmd, arg = cmd.strip().lstrip("/").lower(), arg.strip()
                 else:
                     parts = raw.lstrip("/").split(None, 1)
+                    if not parts:      # input was all slashes — ignore
+                        continue
                     cmd   = parts[0].lower()
                     arg   = parts[1].strip() if len(parts) > 1 else ""
+
+                # Resource keywords only act as commands with a numeric (or
+                # empty) argument — "memory is fascinating" is conversation,
+                # "memory 800" is a command, bare "memory" prints usage.
+                if (cmd in ("speed", "batch", "memory", "fetch", "learn")
+                        and arg and not arg.isdigit()):
+                    cmd = "__chat__"
 
                 if cmd in ("quit", "exit", "q"):
                     console.print("\n  [dim]Saving and shutting down…[/dim]")

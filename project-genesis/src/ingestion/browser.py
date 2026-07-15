@@ -130,11 +130,21 @@ _PAYWALL_DOMAINS = frozenset({
 })
 
 
+def _domain_matches(netloc: str, domains) -> bool:
+    """
+    True if netloc equals a listed domain or is a subdomain of one.
+
+    Suffix matching, not substring: 'group.com' does NOT match 'oup.com',
+    but 'link.springer.com' matches 'springer.com'.
+    """
+    netloc = netloc.lower().removeprefix("www.")
+    return any(netloc == d or netloc.endswith("." + d) for d in domains)
+
+
 def _is_blocked_domain(url: str) -> bool:
     """Return True if the URL's domain matches any entry in _PAYWALL_DOMAINS."""
     try:
-        netloc = urlparse(url).netloc.lower().lstrip("www.")
-        return any(netloc == d or netloc.endswith("." + d) for d in _PAYWALL_DOMAINS)
+        return _domain_matches(urlparse(url).netloc, _PAYWALL_DOMAINS)
     except Exception:
         return False
 
@@ -274,6 +284,37 @@ class GenesisBrowser:
         return False
 
     # ------------------------------------------------------------------
+    # Paywall blocklist (with user-grant override)
+    # ------------------------------------------------------------------
+
+    def is_blocked(self, url: str) -> bool:
+        """
+        True if the URL's domain is on the paywall blocklist AND the user
+        has not granted access.  Resolving an access request for the domain
+        (resolve_access_request) exempts it from the block at runtime.
+        """
+        if not _is_blocked_domain(url):
+            return False
+        return not self._access_granted(urlparse(url).netloc)
+
+    def _access_granted(self, netloc: str) -> bool:
+        """True if a resolved (granted) access request covers this domain."""
+        if self._db is None:
+            return False
+        try:
+            n = netloc.lower().removeprefix("www.")
+            rows = self._db.execute(
+                "SELECT domain FROM web_access_requests WHERE resolved=1"
+            ).fetchall()
+            for (g,) in rows:
+                g = (g or "").lower().removeprefix("www.")
+                if g and (n == g or n.endswith("." + g) or g.endswith("." + n)):
+                    return True
+        except Exception as exc:
+            self._log_error("browser.access_granted", exc)
+        return False
+
+    # ------------------------------------------------------------------
     # Core fetch
     # ------------------------------------------------------------------
 
@@ -293,7 +334,14 @@ class GenesisBrowser:
             return None
 
         domain = urlparse(url).netloc
-        if _is_blocked_domain(url):
+        if self.is_blocked(url):
+            # Still queue an access request (no network cost) so the M25
+            # escalation flow survives: the wake greeting surfaces it, and
+            # resolving it exempts the domain from the block from then on.
+            self.queue_access_request(
+                domain, url,
+                "Known paywalled domain — skipped without fetching",
+            )
             return None
         self._rate_limit(domain)
 
@@ -579,8 +627,10 @@ class GenesisBrowser:
         low = text.lower()
         if any(phrase in low for phrase in _PAYWALL_PHRASES):
             return True
-        domain = urlparse(url).netloc.lower()
-        if any(d in domain for d in _PAYWALL_DOMAINS) and len(text) < 800:
+        # Suffix match, not substring — 'researchgroup.com' must not
+        # trip on the 'oup.com' entry.
+        domain = urlparse(url).netloc
+        if _domain_matches(domain, _PAYWALL_DOMAINS) and len(text) < 800:
             return True
         return False
 

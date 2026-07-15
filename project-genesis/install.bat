@@ -40,8 +40,7 @@ echo  To run Genesis:
 echo.
 echo    Double-click  launch_genesis.bat   (recommended)
 echo.
-echo  Or from a terminal:
-echo    cd src
+echo  Or from a terminal (from this folder):
 echo    python src\gui.py                <- first run (builds foundation, ~1 min)
 echo    python src\gui.py --resume --self-directed
 echo.
