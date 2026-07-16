@@ -185,6 +185,14 @@ class Orchestrator:
         from cognition.decision_log import DecisionLog
         self.decision_log = DecisionLog(_conn)
 
+        # M29: Persistent goals — intentions that survive sessions.  A goal
+        # is distinct from a curiosity directive: a directive is a gap, a
+        # goal is an intention, satisfied only when the self-model verdict
+        # for its topic reaches 'solid'.  Formed by conversation ("remember
+        # to learn about X") or by Genesis itself from analog gaps.
+        from cognition.goals import GoalEngine
+        self.goals = GoalEngine(self)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -914,6 +922,35 @@ class Orchestrator:
         except Exception as exc:
             self.survival.resilience.error_log.log("reflect.hypotheses", exc)
 
+        # M29: goal maintenance each reflection — check whether any active
+        # goal's topic has reached 'solid' understanding, let Genesis form a
+        # goal of its own from analog gaps, and re-arm the curiosity frontier
+        # with active goal topics so they are worked on without re-statement.
+        try:
+            satisfied = self.goals.check_satisfaction()
+            for topic in satisfied:
+                if self.verbose:
+                    self._log(f"  🎯 goal satisfied: I now understand {topic}")
+                self.decision_log.record(
+                    subsystem="goals",
+                    decision=f"satisfied goal: understand {topic}",
+                    rationale="self-model verdict for the topic reached 'solid'",
+                    cycle=cycle or self.cycle_count,
+                )
+            new_self_goals = self.goals.self_form_from_analogs()
+            if new_self_goals:
+                latest = self.goals.active()[:1]
+                if latest:
+                    self.decision_log.record(
+                        subsystem="goals",
+                        decision=f"formed goal: {latest[0].statement}",
+                        rationale="self-formed from a structural analog gap",
+                        cycle=cycle or self.cycle_count,
+                    )
+            self.goals.push_directives()
+        except Exception as exc:
+            self.survival.resilience.error_log.log("reflect.goals", exc)
+
         # M30.2: every Nth reflection, draft a research direction from current
         # state. Spacing it out keeps the proposal a considered statement rather
         # than noise that rewrites itself each pass.
@@ -954,6 +991,32 @@ class Orchestrator:
             self.survival.resilience.error_log.log("reflect.programs", exc)
 
         return result
+
+    def form_goal(self, topic: str, origin: str = "conversation"):
+        """
+        Form a persistent goal to understand `topic` (M29).  Returns the
+        Goal, or None if one already exists / the active list is full.
+        Records the formation in the DecisionLog.
+        """
+        goal = self.goals.form(topic, origin=origin)
+        if goal is not None:
+            self.decision_log.record(
+                subsystem="goals",
+                decision=f"formed goal: {goal.statement}",
+                rationale=("user request" if origin == "conversation"
+                           else "self-formed from a structural analog gap"),
+                cycle=self.cycle_count,
+            )
+            # Start pursuing immediately — don't wait for the next reflection.
+            self.goals.push_directives()
+        return goal
+
+    def goal_report(self) -> dict:
+        """Active and recently satisfied goals, for voice and inspection."""
+        return {
+            "active":    self.goals.active(),
+            "satisfied": self.goals.satisfied(limit=5),
+        }
 
     def set_working_capacity(self, n: int) -> int:
         """

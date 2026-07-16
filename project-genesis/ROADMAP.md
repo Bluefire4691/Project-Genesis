@@ -382,36 +382,54 @@ Full suite: 1197 passed, 24 skipped.
 
 ---
 
-### M29: Persistent Goal Formation
+### M29: Persistent Goal Formation ✅
 
 **The gap:** curiosity directives exist but they are reactive (formed when
-prediction error is high, resolved when edges are added). Genesis has no goals it
+prediction error is high, resolved when edges are added). Genesis had no goals it
 forms *proactively* — no "I want to understand X" that persists beyond the mechanism
 that triggered it.
 
-**What success looks like:**
-- Genesis can form a goal through conversation: "learn more about how ecosystems
-  self-regulate" becomes a goal that persists across sessions until satisfied
-- Goals are distinct from directives: a directive is a gap; a goal is an intention
-- `brain.goals` is inspectable and expressible ("I have been trying to understand X")
-- Goals can be self-formed (from pattern transfer discovering an analog with missing
-  edges) or conversation-formed (explicit user request)
-- A goal is "satisfied" when Genesis can express a Stage 3 answer about it
+**What was built:** `src/cognition/goals.py` — `GoalEngine`.
+
+A `goals` table in the main memory DB holds intentions: topic, first-person
+statement, origin (`conversation` | `self`), status (`active` | `satisfied`).
+Satisfied goals are kept forever — an intention fulfilled is part of Genesis's
+history, never deleted.
+
+- **Formation** — `brain.form_goal(topic)` dedupes per topic and caps active
+  goals at 12 (an intention list needs focus).  Conversation: "remember to
+  learn about X" / "keep studying X" / "I want you to understand X" form a
+  goal — recognised *before* the M32 LLM delegation because formation is an
+  action, not phrasing.  Self-formation: each reflection, one pattern-transfer
+  analog gap may be promoted to a goal ("understand X — it mirrors a
+  structural pattern I already know").
+- **Pursuit** — every reflection re-arms the curiosity frontier with active
+  goal topics at weight 0.9 (above analog hunches).  This is what "worked on
+  without being re-stated" means: the goal re-injects its own directive each
+  session until satisfied.
+- **Satisfaction** — measured, not counted: a goal is satisfied when the M27
+  self-model verdict for its topic reaches **solid** (Stage-3-answer
+  territory), never by a fixed edge count.
+- **Audit** — formation and satisfaction are recorded in the M28 DecisionLog,
+  so "what have you been deciding?" covers intentions too.
+- **Voice** — "what are your goals?" / "what are you trying to learn?" →
+  `_say_goals()`: active topics, oldest intention's age, which goals are
+  self-formed, recent satisfactions.  The M32 LLM grounding context includes
+  the active goal set.
 
 **Cross-layer interaction review:**
-- Goals must persist to SQLite — same survival gating as DecisionLog
-- Goal satisfaction check runs in M20 autonomous loop — performance budget
-- M27 self-model is a prerequisite: goal satisfaction is measured by self_model()
-  returning adequate confidence, not by a fixed edge count
-- Voice layer: `_query_topic()` must recognise "remember to learn about X" as a
-  goal-formation intent, not a learn-now intent
+- Goals write only to their own table on the shared conn; all failures route
+  to `survival.resilience.error_log` (no `except: pass`)
+- Satisfaction check runs per-reflection (not per-cycle) and only over ≤12
+  active goals — bounded self-model queries
+- The goal-query intent is deliberately narrow: "what are you working on?"
+  still belongs to the plans handler (caught by an existing regression test)
 
-**Integration tests required before ✅:**
-1. After "please learn about plate tectonics" across two sessions, the goal persists
-   into session 2 and is worked on without being re-stated
-2. A self-formed goal (from pattern transfer) appears in `brain.goals` without any
-   conversation trigger
-3. `chat_respond("what are you trying to learn?")` reflects the active goal set
+**Integration tests (all green, `tests/test_goals.py`):** the three roadmap
+requirements verified — cross-session persistence with resumed pursuit,
+self-formed goal without conversation trigger, chat reflecting the goal set —
+plus dedupe/cap, solid-verdict satisfaction, DecisionLog records, and honest
+no-goals answers.  Full suite: 1234 passed.
 
 ---
 

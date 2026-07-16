@@ -252,6 +252,19 @@ class GenesisVoiceLLM:
         except Exception:
             pass
 
+        # ── Active goals (M29) ─────────────────────────────────────────
+        # Grounds "what are you trying to learn?" in the actual goal set.
+        try:
+            report = self._brain.goal_report()
+            active = report.get("active", [])
+            if active:
+                lines = [f"- {g.statement} (origin: {g.origin})"
+                         for g in active[:5]]
+                sections.append("ACTIVE GOALS (persistent intentions):\n"
+                                + "\n".join(lines))
+        except Exception:
+            pass
+
         # ── Recent decisions (M28) ─────────────────────────────────────
         # Grounds "what have you been deciding?" in the actual DecisionLog
         # rather than letting the model improvise.

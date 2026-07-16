@@ -327,6 +327,34 @@ class GenesisVoice:
         # Log the user turn before routing
         self._log_turn("user", user_text, set(concepts))
 
+        # ── M29: goal formation — an ACTION, so it runs before the LLM
+        #    delegation (the LLM can phrase things; it must not swallow a
+        #    state change).  "remember to learn about X" / "keep studying X"
+        #    forms a persistent goal, not a learn-right-now request.
+        _goal_m = re.search(
+            r"(?:remember|don'?t\s+forget|keep|continue|make\s+it\s+a\s+goal)"
+            r"\s+(?:to\s+|on\s+)?"
+            r"(?:learn|read|study|research|understand)(?:ing)?\s+"
+            r"(?:more\s+)?(?:about\s+)?(.+?)[\s?.!]*$",
+            text, re.I,
+        ) or re.search(
+            r"i\s+want\s+you\s+to\s+(?:learn|understand|study)\s+"
+            r"(?:more\s+)?(?:about\s+)?(.+?)[\s?.!]*$",
+            text, re.I,
+        )
+        if _goal_m:
+            _topic = re.sub(r"^(a|an|the|some)\s+", "", _goal_m.group(1).strip())
+            if _topic:
+                goal = self._brain.form_goal(_topic)
+                if goal is not None:
+                    reply = (f"I'll keep working on understanding {_topic}. "
+                             f"That's a goal now — it will stay with me "
+                             f"across our sessions until I genuinely get it.")
+                else:
+                    reply = (f"I'm already carrying an intention about "
+                             f"{_topic} — I haven't let it go.")
+                return self._log_and_return(reply, {_topic})
+
         # ── M32: LLM expression layer ─────────────────────────────────────
         # When an LLM voice is wired in, delegate conversational responses to
         # it. The LLM receives Genesis's internal state as grounding context and
@@ -394,6 +422,18 @@ class GenesisVoice:
             text, re.I,
         ):
             reply = self._say_rules()
+            return self._log_and_return(reply, set())
+
+        # ── Intent: M29 goals — "what are you trying to learn?" ─────────────
+        # Narrow on purpose: "what are you working on?" belongs to the plans
+        # handler (next step), not the standing-goal list.
+        if re.search(
+            r"what\s+are\s+your\s+(?:current\s+)?(?:goals?|intentions?)|"
+            r"trying\s+to\s+(?:learn|understand)|"
+            r"what\s+do\s+you\s+want\s+to\s+(?:learn|understand)",
+            text, re.I,
+        ):
+            reply = self._say_goals()
             return self._log_and_return(reply, set())
 
         # ── Intent: M28 DecisionLog — "what have you been deciding?" ────────
@@ -1240,6 +1280,48 @@ class GenesisVoice:
                 f"confirmed — that's my calibration as a rule-author so far."
             )
 
+        return "  ".join(parts)
+
+    def _say_goals(self) -> str:
+        """
+        Speak the active goal set (M29) — what Genesis is trying to
+        understand, where each intention came from, and what it has
+        recently satisfied.
+        """
+        goals = getattr(self._brain, "goals", None)
+        if goals is None:
+            return "I don't hold persistent goals yet."
+
+        report = self._brain.goal_report()
+        active    = report.get("active", [])
+        satisfied = report.get("satisfied", [])
+
+        if not active and not satisfied:
+            return ("I don't have a standing goal right now — I'm following "
+                    "my curiosity wherever it leads. Tell me to remember to "
+                    "learn about something and I'll hold onto it.")
+
+        parts = []
+        if active:
+            topics = self._english_list([g.topic for g in active[:4]])
+            parts.append(f"I'm trying to understand {topics}.")
+            oldest = min(active, key=lambda g: g.formed_at)
+            if oldest.age_days >= 1.0:
+                parts.append(
+                    f"I've been carrying the {oldest.topic} intention for "
+                    f"{oldest.age_days:.0f} day{'s' if oldest.age_days >= 2 else ''}."
+                )
+            self_formed = [g for g in active if g.origin == "self"]
+            if self_formed:
+                parts.append(
+                    f"The goal about {self_formed[0].topic} is one I set for "
+                    f"myself — it mirrors a pattern I already know."
+                )
+        if satisfied:
+            parts.append(
+                f"I recently reached genuine understanding of "
+                f"{self._english_list([g.topic for g in satisfied[:2]])}."
+            )
         return "  ".join(parts)
 
     def _say_decisions(self) -> str:

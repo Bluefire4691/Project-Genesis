@@ -119,7 +119,7 @@ layers. The survival OS runs beneath every cycle regardless of what higher layer
 
 ---
 
-## Current Milestone: M32 complete — next: M28 (Deliberative Integration)
+## Current Milestone: M29 complete — all planned milestones through M33 shipped
 
 **Full milestone history is in `ROADMAP.md`.** This table is kept brief here to avoid
 duplication; the roadmap is the authoritative source of truth for project state.
@@ -136,7 +136,7 @@ duplication; the roadmap is the authoritative source of truth for project state.
 | M26 | ✅ | Drive system: five biological-analog internal pressures (hunger/frustration/anticipation/boredom/dissonance) that update each cycle, persist across sessions, and surface in conversation |
 | M27 | ✅ | Self-model: Genesis knows what it knows — callable read-only view (`brain.self_model(concept)`) over coverage, confidence, contested beliefs, with honest verdict tiers (unknown/sparse/partial/solid); "how well do you understand X?" answers from measurement, not performance |
 | M28 | ✅ | Deliberative integration: persistent DecisionLog records what Genesis decided and why each cycle; `brain.recent_decisions(n)`; "what have you been deciding?" routes to _say_decisions() |
-| M29 | 🔲 | Persistent goal formation: goals beyond session-level directives |
+| M29 | ✅ | Persistent goal formation: GoalEngine — intentions that survive sessions, formed by conversation ("remember to learn about X") or self-formed from analog gaps; satisfied only when the self-model verdict reaches 'solid'; recorded in the DecisionLog; "what are your goals?" answers from the real goal set |
 | M30 | ✅ | Hypothesis engine: Genesis authors falsifiable predictions (analogy/contradiction/chain), tests them against later evidence, owns its hits and misses — its first generative organ |
 | M30.2 | ✅ | Research proposal: Genesis composes a first-person research direction (what it understands / can't explain / predicts / will read) from its own state — an authored artifact, not retrieved text |
 | M31 | ✅ | Inference programs: Genesis mines its own graph for recurrent chain patterns, authors declarative if-then rules empirically (no hard-coded logic), executes them to derive new edges, tracks hit rate — accumulated individuality expressed as program logic |
