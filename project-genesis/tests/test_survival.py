@@ -71,8 +71,10 @@ def test_resource_manager_throttle_reduces_capabilities():
         assert "text" in caps, f"text must always be available (level {level.name})"
     # EMERGENCY has fewest capabilities
     assert len(CAPABILITIES[ThrottleLevel.EMERGENCY]) < len(CAPABILITIES[ThrottleLevel.NONE])
-    # NONE has all capabilities
+    # NONE has all capabilities (audio joined in M35 — most expensive sense,
+    # first to degrade)
     assert CAPABILITIES[ThrottleLevel.NONE] == {"text", "numeric", "pattern",
+                                                  "audio",
                                                   "memory_search", "memory_store",
                                                   "logging", "curriculum"}
 

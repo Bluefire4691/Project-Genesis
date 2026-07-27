@@ -553,6 +553,38 @@ mechanism, different programs.
 
 **Status:** ✅ — 20 tests in `test_inference_programs.py`; full suite 1031 passing.
 
+### M35: Rich-Input Modality — Audio + Provenance Surfacing ✅
+
+**The gap:** the seed claimed modularity over "audio, video, sound, or
+otherwise" but only sensed text/numeric/pattern; and M18 tracked source trust
+internally with no way for Genesis (or a user) to ask "where did you learn
+that, and do you trust it?"
+
+**What was built:**
+- `src/processors/audio.py` — `AudioProcessor`: extracts structure from raw
+  WAV/sample input with the stdlib only (no pretrained weights — the
+  blank-start principle applies to hearing too): loudness envelope + trend,
+  onset events, rhythm via envelope autocorrelation (tempo + regularity),
+  timbre brightness via zero-crossing rate, silence ratio.  Non-audio input
+  is quietly skipped (all processors see all input).  Registered in the
+  orchestrator and in the survival capability map at NONE only — the most
+  expensive sense degrades first; text still survives to EMERGENCY.
+- **Modality-agnostic relation hook:** the orchestrator now accepts
+  `extracted["relations"]` triples from ANY processor (was text-only), so
+  sound structure lands in the same graph Genesis reasons over — and any
+  future modality (video, imagery, "or otherwise") plugs in by implementing
+  `BaseProcessor` and emitting triples.  That registry is the modularity.
+- **Provenance surfacing:** `self_model(concept)` now returns `sources` —
+  per-source relation counts with M18 trust scores.  Voice intent "where did
+  you learn about X?" answers from that ledger, including how trust is
+  re-weighed when a source proves wrong.
+
+**Tests:** 8 in `tests/test_audio_modality.py` — synthesized WAV with known
+rhythm recovered (onsets, regularity, silence), relations stored through the
+real pipeline, corrupt audio processed as data not crash, throttle
+degradation order, source reporting with trust, honest no-source answers.
+Full suite: 1242 passed.
+
 ---
 
 ## Open Questions (Ongoing)

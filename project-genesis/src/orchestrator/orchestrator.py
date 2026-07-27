@@ -26,7 +26,8 @@ from typing import Any
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.types import ProcessorOutput
-from processors import TextProcessor, NumericProcessor, PatternProcessor
+from processors import (TextProcessor, NumericProcessor, PatternProcessor,
+                        AudioProcessor)
 from processors.interoception import interoception_sample
 from memory.memory import MemorySystem
 from memory.archive import ArchiveStore
@@ -80,6 +81,7 @@ class Orchestrator:
             "text":    TextProcessor(),
             "numeric": NumericProcessor(),
             "pattern": PatternProcessor(),
+            "audio":   AudioProcessor(),   # M35 rich-input modality
         }
 
         # Memory system — optionally with explicit DB path and working capacity
@@ -658,15 +660,16 @@ class Orchestrator:
                 source_type=src,
             )
 
-        # Relation extraction — store typed triples from text outputs.
+        # Relation extraction — store typed triples from processor outputs.
+        # Modality-agnostic: any processor that emits extracted["relations"]
+        # triples participates (text extracts them from prose, audio from
+        # signal structure, future modalities from their own analyses).
         # M16: boost confidence when multiple processors independently confirm
         # the subject or object concept (Hawkins voting: independent columns
         # agreeing raises certainty more than one column repeating).
         votes = synthesis.processor_votes
         relations_added = 0
         for output in [primary] + synthesis.secondary_outputs:
-            if output.source != "text":
-                continue
             for rel in output.extracted.get("relations", []):
                 subj_votes = votes.get(rel["subject"], 1)
                 obj_votes  = votes.get(rel["object"],  1)

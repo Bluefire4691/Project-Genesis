@@ -424,6 +424,41 @@ class GenesisVoice:
             reply = self._say_rules()
             return self._log_and_return(reply, set())
 
+        # ── Intent: provenance — "where did you learn about X?" ─────────────
+        # Answers from the self-model's source ledger: which sources the
+        # beliefs came from and how trustworthy each has proven (M18).
+        _src_m = re.search(
+            r"(?:where|how)\s+did\s+you\s+(?:learn|hear|find\s+out)\s+"
+            r"(?:about\s+|that\s+)?(.+?)[\s?.!]*$|"
+            r"(?:what(?:'s| is) your source|who told you)\s+"
+            r"(?:for|about|on)\s+(.+?)[\s?.!]*$",
+            text, re.I,
+        )
+        if _src_m:
+            _topic = (_src_m.group(1) or _src_m.group(2) or "").strip()
+            _topic = re.sub(r"^(a|an|the)\s+", "", _topic)
+            if _topic:
+                sm = self._brain.self_model(_topic)
+                srcs = sm.get("sources", [])
+                if not srcs or sm.get("relation_count", 0) == 0:
+                    reply = (f"I don't hold beliefs about {_topic} yet, "
+                             f"so there's no source to cite.")
+                else:
+                    bits = []
+                    for s in srcs[:3]:
+                        trust = s["trust"]
+                        t_word = ("reliable" if trust >= 0.8 else
+                                  "fairly reliable" if trust >= 0.6 else
+                                  "shaky")
+                        bits.append(f"{s['source']} "
+                                    f"({s['relations']} beliefs, "
+                                    f"{t_word} — trust {trust:.2f})")
+                    reply = (f"My beliefs about {_topic} trace to: "
+                             f"{'; '.join(bits)}. If a source proves wrong, "
+                             f"its trust drops and everything it taught me "
+                             f"gets re-weighed.")
+                return self._log_and_return(reply, {_topic})
+
         # ── Intent: M29 goals — "what are you trying to learn?" ─────────────
         # Narrow on purpose: "what are you working on?" belongs to the plans
         # handler (next step), not the standing-goal list.

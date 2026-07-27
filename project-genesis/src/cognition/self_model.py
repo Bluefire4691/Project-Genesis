@@ -156,7 +156,32 @@ class SelfModel:
 
         verdict = self._verdict(relation_count, confidence, len(contested))
 
+        # Provenance: where the beliefs about this concept came from, and how
+        # trustworthy each source has proven (M18 source-trust ledger).  This
+        # is what lets Genesis answer "where did you learn that?" honestly.
+        sources: list[dict] = []
+        try:
+            rows = self._brain.relations._conn.execute(
+                """SELECT COALESCE(source_key, '(unrecorded)'),
+                          COALESCE(session_id, ''), COUNT(*)
+                   FROM relations
+                   WHERE subject = ? OR object = ?
+                   GROUP BY source_key, session_id
+                   ORDER BY COUNT(*) DESC LIMIT 6""",
+                (norm, norm),
+            ).fetchall()
+            for src_key, sess, n in rows:
+                sources.append({
+                    "source": src_key,
+                    "relations": n,
+                    "trust": round(
+                        self._brain.belief_revision.source_trust_score(sess), 2),
+                })
+        except Exception as exc:
+            self._log("self_model.sources", exc)
+
         return {
+            "sources": sources,
             "concept": norm,
             "relation_count": relation_count,
             "as_subject": len(as_subj),

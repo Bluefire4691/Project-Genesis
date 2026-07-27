@@ -51,7 +51,9 @@ class ThrottleLevel(IntEnum):
 # Capabilities available at each throttle level.
 # Keys are checked via ResourceManager.can(capability).
 CAPABILITIES: dict[int, set] = {
-    ThrottleLevel.NONE:      {"text", "numeric", "pattern", "memory_search", "memory_store", "logging", "curriculum"},
+    # audio is the most expensive sense — it degrades first (subsumption:
+    # lose breadth before function; text survives to the very last level)
+    ThrottleLevel.NONE:      {"text", "numeric", "pattern", "audio", "memory_search", "memory_store", "logging", "curriculum"},
     ThrottleLevel.LIGHT:     {"text", "numeric", "memory_search", "memory_store", "logging", "curriculum"},
     ThrottleLevel.MODERATE:  {"text", "memory_store", "logging"},
     ThrottleLevel.CRITICAL:  {"text", "memory_store"},
