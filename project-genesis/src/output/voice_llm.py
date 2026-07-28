@@ -252,6 +252,23 @@ class GenesisVoiceLLM:
         except Exception:
             pass
 
+        # ── Held values and tastes (M36) ───────────────────────────────
+        try:
+            vs = getattr(self._brain, "values", None)
+            if vs is not None:
+                held = vs.held(limit=4)
+                if held:
+                    lines = [f"- {v['statement']} (confidence {v['confidence']})"
+                             for v in held]
+                    sections.append("HELD VALUES (self-authored from "
+                                    "experience, not given):\n" + "\n".join(lines))
+                tastes = vs.strongest_tastes(n=4)
+                if tastes:
+                    sections.append("TASTES (learned preferences): " + ", ".join(
+                        f"{c} ({w:+.2f})" for c, w in tastes))
+        except Exception:
+            pass
+
         # ── Active goals (M29) ─────────────────────────────────────────
         # Grounds "what are you trying to learn?" in the actual goal set.
         try:

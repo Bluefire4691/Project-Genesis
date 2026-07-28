@@ -195,6 +195,15 @@ class Orchestrator:
         from cognition.goals import GoalEngine
         self.goals = GoalEngine(self)
 
+        # M36: Self-determined interests and values.  Tastes accumulate from
+        # the liking signal per concept (what rewarded THIS instance);
+        # values are authored from consequence patterns valenced by those
+        # tastes — no engineer-supplied good/bad ontology.  Both feed back
+        # into curiosity ranking, so what Genesis reads next is partly its
+        # own preference.
+        from cognition.values import ValueSystem
+        self.values = ValueSystem(self)
+
         # The survival RSS ceiling is set generously: Genesis is designed to
         # accumulate knowledge, and the corpus + working set legitimately grows.
         # The survival pressure exists to create selectivity of attention, not
@@ -501,6 +510,17 @@ class Orchestrator:
             }
         except Exception:
             pass
+
+        # M36: attribute this cycle's hedonic signal to its active concepts.
+        # Tastes accumulate slowly (EMA); over time the ranking of "what is
+        # interesting" is partly written by this instance's own history.
+        try:
+            self.values.credit(
+                synthesis.cross_modal_concepts or synthesis.context_terms or [],
+                drive_summary.get("liking", 0.0),
+            )
+        except Exception as exc:
+            self.survival.resilience.error_log.log("values.credit_cycle", exc)
 
         return {
             "status": "processed",
@@ -953,6 +973,24 @@ class Orchestrator:
             self.goals.push_directives()
         except Exception as exc:
             self.survival.resilience.error_log.log("reflect.goals", exc)
+
+        # M36: author or revise values from consequence patterns weighed by
+        # lived taste.  Reflection is when the graph and the hedonic history
+        # are both richest — the natural moment for principle formation.
+        try:
+            value_changes = self.values.author_from_experience()
+            if value_changes:
+                if self.verbose:
+                    self._log(f"  ⚖️  {value_changes} value(s) formed or revised")
+                self.decision_log.record(
+                    subsystem="values",
+                    decision=f"formed/revised {value_changes} value(s) from experience",
+                    rationale=("consequence patterns valenced by my own "
+                               "liking history — not given, grown"),
+                    cycle=cycle or self.cycle_count,
+                )
+        except Exception as exc:
+            self.survival.resilience.error_log.log("reflect.values", exc)
 
         # M30.2: every Nth reflection, draft a research direction from current
         # state. Spacing it out keeps the proposal a considered statement rather

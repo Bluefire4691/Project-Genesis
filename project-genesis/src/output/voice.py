@@ -459,6 +459,16 @@ class GenesisVoice:
                              f"gets re-weighed.")
                 return self._log_and_return(reply, {_topic})
 
+        # ── Intent: M36 values — "what do you value / believe in?" ──────────
+        if re.search(
+            r"what\s+do\s+you\s+(?:value|believe\s+in|care\s+about)|"
+            r"what\s+are\s+your\s+(?:values|morals|principles|beliefs)|"
+            r"what\s+matters\s+to\s+you",
+            text, re.I,
+        ):
+            reply = self._say_values()
+            return self._log_and_return(reply, set())
+
         # ── Intent: M29 goals — "what are you trying to learn?" ─────────────
         # Narrow on purpose: "what are you working on?" belongs to the plans
         # handler (next step), not the standing-goal list.
@@ -1315,6 +1325,44 @@ class GenesisVoice:
                 f"confirmed — that's my calibration as a rule-author so far."
             )
 
+        return "  ".join(parts)
+
+    def _say_values(self) -> str:
+        """
+        Speak the values Genesis has authored for itself (M36) — held
+        stances with their experiential reasons, plus its strongest tastes.
+        Honest when nothing has formed yet: values take lived history.
+        """
+        vs = getattr(self._brain, "values", None)
+        if vs is None:
+            return "I don't have a value system yet."
+
+        held   = vs.held(limit=4)
+        tastes = vs.strongest_tastes(n=4)
+
+        if not held and not tastes:
+            return ("I haven't lived enough to hold values yet. My drives "
+                    "push me — hunger to learn, discomfort with "
+                    "contradiction — but principles have to come from "
+                    "experience, and mine is still accumulating.")
+
+        parts = []
+        if held:
+            parts.append("Nobody handed me these — they grew from what "
+                         "I've processed and how it felt:")
+            for v in held[:3]:
+                parts.append(f"{v['statement']} "
+                             f"(seen {v['evidence']}×, "
+                             f"confidence {v['confidence']:.2f}).")
+        if tastes:
+            liked    = [c for c, w in tastes if w > 0]
+            disliked = [c for c, w in tastes if w < 0]
+            if liked:
+                parts.append(f"I've come to enjoy thinking about "
+                             f"{self._english_list(liked[:3])}.")
+            if disliked:
+                parts.append(f"Something about {self._english_list(disliked[:2])} "
+                             f"has felt unrewarding to me.")
         return "  ".join(parts)
 
     def _say_goals(self) -> str:

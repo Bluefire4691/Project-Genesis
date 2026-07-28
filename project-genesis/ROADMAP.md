@@ -585,6 +585,44 @@ real pipeline, corrupt audio processed as data not crash, throttle
 degradation order, source reporting with trust, honest no-source answers.
 Full suite: 1242 passed.
 
+### M36: Self-Determined Interests and Values ✅
+
+**The gap (named by Jacob):** Genesis chose topics, but never chose *how it
+chooses* — the interest-scoring functions were engineered, static, identical
+in every instance.  And M12's ethics lens could notice consequence patterns
+but nothing promoted them into held values, and no value ever changed a
+decision.  It could notice what looks moral; it could not care.
+
+**What was built:** `src/cognition/values.py` — `ValueSystem`, mirroring how
+humans acquire values without dictation:
+- **Tastes** — every cycle, the M34 liking signal is credited (slow EMA) to
+  that cycle's active concepts.  What rewarded THIS instance becomes what it
+  prefers; the `tastes` table persists across sessions.
+- **Values** — each reflection, recurring EthicsLens consequence patterns are
+  promoted into first-person value statements ("I avoid overgrazing — in
+  what I've processed it leads to collapse, which I've disliked in my own
+  experience").  **Valence comes from Genesis's own taste for the outcome —
+  there is no engineer-supplied good/bad ontology, and a value cannot form
+  before Genesis has lived any feeling about the outcome.**  Conflicting
+  patterns lower confidence and annotate the statement (tension, not
+  erasure); nothing is deleted.
+- **Governance** — `curiosity_adjustment()` feeds taste (±0.3) and stance
+  (favor +0.25 / avoid −0.4) into curiosity ranking.  When preference
+  materially changes the top-n reading choice, the shift is recorded in the
+  M28 DecisionLog ("preference shaped my reading: chose X over Y").
+- **Testimony, not directive** — user statements already enter as evidence
+  from a trust-scored source (M18); nothing in M36 gives the user's words
+  rule status.  Parent, not programmer.
+- **Voice** — "what do you value / what are your morals?" → `_say_values()`:
+  authored statements with evidence counts, strongest tastes, and an honest
+  "I haven't lived enough to hold values yet" before history accumulates.
+  LLM grounding context includes held values and tastes.
+
+**Tests:** 11 in `tests/test_values.py` — taste accumulation/flip/persistence,
+no-value-without-lived-valence, avoid-value formation from disliked outcomes,
+conflict-as-tension, ranking governance, DecisionLog audit of a
+preference-shaped choice, honest voice.  Full suite: 1253 passed.
+
 ---
 
 ## Open Questions (Ongoing)

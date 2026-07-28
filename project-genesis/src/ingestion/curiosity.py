@@ -154,6 +154,33 @@ class CuriosityEngine:
             if concept not in seen or seen[concept] < score:
                 seen[concept] = score
 
+        # M36: taste and held values adjust the ranking — the base formula
+        # is engineered, but this term is written by the instance's own
+        # history.  When preference materially changes the choice (top-n
+        # membership shifts), the decision is auditable in the DecisionLog.
+        vs = getattr(self._brain, "values", None)
+        if vs is not None and seen:
+            base_top = {c for c, _ in sorted(
+                seen.items(), key=lambda kv: kv[1], reverse=True)[:n]}
+            for concept in seen:
+                seen[concept] += vs.curiosity_adjustment(concept)
+            new_top = {c for c, _ in sorted(
+                seen.items(), key=lambda kv: kv[1], reverse=True)[:n]}
+            if new_top != base_top:
+                try:
+                    gained = ", ".join(sorted(new_top - base_top)) or "—"
+                    dropped = ", ".join(sorted(base_top - new_top)) or "—"
+                    self._brain.decision_log.record(
+                        subsystem="values",
+                        decision=(f"preference shaped my reading: "
+                                  f"chose {gained} over {dropped}"),
+                        rationale="taste and held values adjusted curiosity ranking",
+                        cycle=self._brain.cycle_count,
+                    )
+                except Exception as exc:
+                    self._brain.survival.resilience.error_log.log(
+                        "curiosity.value_log", exc)
+
         ranked = sorted(seen.items(), key=lambda kv: kv[1], reverse=True)
         topics = [concept for concept, _ in ranked[:n]]
         self._fetched_topics.update(topics)
