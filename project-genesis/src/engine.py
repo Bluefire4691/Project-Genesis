@@ -401,9 +401,15 @@ class GenesisEngine:
         _last_err_log = 0.0
         _drives_snap: dict = {}
 
-        _REFLECT_EVERY = 400
-        _AUTOSAVE      = 120.0
-        _STATUS_HZ     = 1.0
+        # Reflection needs BOTH enough new cycles AND enough wall-clock time.
+        # The cycle count alone was tuned at ~2 cycles/s; at 100+ cycles/s it
+        # fired ~3s after launch and froze everything behind a huge
+        # consolidation pass (the launch-freeze bug).
+        _REFLECT_EVERY  = 400
+        _REFLECT_MIN_S  = 300.0     # at most one reflection per 5 minutes
+        _AUTOSAVE       = 120.0
+        _STATUS_HZ      = 1.0
+        last_reflect_t  = time.time()
 
         while not self._stop.is_set():
             try:
@@ -483,8 +489,13 @@ class GenesisEngine:
                         "concepts":    concepts,
                     })
 
-                # Periodic consolidation
-                if (cycles - last_reflect) >= _REFLECT_EVERY:
+                # Periodic consolidation — cycle AND time gated, with a
+                # visible notice so a long pass doesn't look like a freeze.
+                if ((cycles - last_reflect) >= _REFLECT_EVERY
+                        and (time.time() - last_reflect_t) >= _REFLECT_MIN_S):
+                    self._on_system(
+                        "Reflecting — consolidating what I've learned. "
+                        "This can take a minute; thinking resumes after.")
                     try:
                         with self.lock:
                             rep = brain.reflect(cycle=cycles)
@@ -493,7 +504,8 @@ class GenesisEngine:
                             self._on_genesis(summary)
                     except Exception as exc:
                         self._log_error("engine.reflect", exc)
-                    last_reflect = cycles
+                    last_reflect   = cycles
+                    last_reflect_t = time.time()
 
                 # Periodic auto-save
                 if (time.time() - last_save) >= _AUTOSAVE:
