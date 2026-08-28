@@ -99,6 +99,9 @@ class GenesisEngine:
 
         self._fetch_topic = ""
         self.cyc_per_sec = 0.0
+        # Content-grounded expression state
+        self._express_content_next = True
+        self._last_expressed_rel_t = time.time()
 
     # ------------------------------------------------------------------
     # Lock access
@@ -114,6 +117,41 @@ class GenesisEngine:
             yield
         finally:
             self.lock.release()
+
+    def _newest_connection(self):
+        """
+        Say something about the concept Genesis most recently connected —
+        in language drawn from what it actually read, not from a frame here.
+
+        Routes through the M23 staged composition (_compose_about), which
+        echoes retained prose and only grows fluent as understanding grows;
+        falls back to surfacing a real retained sentence verbatim.  There is
+        deliberately no sentence template in this module: the engine picks
+        the SUBJECT, Genesis's own reading supplies the WORDS.
+
+        Returns None when it has nothing of its own to say.
+        Must be called holding the lock.
+        """
+        try:
+            row = self.brain.relations._conn.execute(
+                "SELECT subject, created_at FROM relations "
+                "WHERE created_at > ? ORDER BY created_at DESC LIMIT 1",
+                (self._last_expressed_rel_t,),
+            ).fetchone()
+            if row is None:
+                return None
+            subject, ts = row
+            self._last_expressed_rel_t = ts
+
+            voice = self.brain.voice
+            said = voice._compose_about(subject)
+            if said:
+                return said
+            prose = voice._pull_prose_about(subject, n=1)
+            return prose[0] if prose else None
+        except Exception as exc:
+            self._log_error("engine.newest_connection", exc)
+            return None
 
     def _log_error(self, label: str, exc: Exception) -> None:
         try:
@@ -457,11 +495,20 @@ class GenesisEngine:
                     _tput_t0    = now
                     _tput_count = 0
 
-                # Spontaneous expression
+                # Spontaneous expression — alternates between drive phrases
+                # ("things are coming together") and CONTENT: the newest
+                # relation Genesis actually formed.  Drive phrases alone are a
+                # ~5-template pool, which made hours of running sound like the
+                # same four sentences; content is unbounded.
                 try:
                     if cycles % 40 < batch_size:
+                        expr = None
                         with self.lock:
-                            expr = brain.drives.expressive_state()
+                            if self._express_content_next:
+                                expr = self._newest_connection()
+                            if expr is None:
+                                expr = brain.drives.expressive_state()
+                        self._express_content_next = not self._express_content_next
                         if expr:
                             self._on_genesis(expr)
                 except Exception as exc:
