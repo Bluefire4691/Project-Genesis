@@ -5,7 +5,7 @@
 **Team artifacts:** [`docs/v2/RESEARCH_SURVEY.md`](docs/v2/RESEARCH_SURVEY.md) ·
 [`docs/v2/ARCHITECTURE_V2.md`](docs/v2/ARCHITECTURE_V2.md) ·
 [`docs/v2/EVALUATION.md`](docs/v2/EVALUATION.md) ·
-[`docs/v2/SALVAGE_AUDIT.md`](docs/v2/SALVAGE_AUDIT.md)
+[`docs/v2/SALVAGE_AUDIT.md`](docs/v2/SALVAGE_AUDIT.md) · [`docs/v2/CORPUS.md`](docs/v2/CORPUS.md)
 
 ---
 
@@ -59,9 +59,10 @@ accumulated individuality, calibrated self-knowledge.
 | 1.2 | Twin runner | Launch 2 instances with disjoint corpora + a same-corpus/different-seed control; collect topic-choice distributions and claim sets. |
 | 1.3 | Divergence metrics (C1) | Jensen–Shannon over topic choices; Jaccard over claims; **retrieval-detach switch** implemented. |
 | 1.4 | Calibration harness (C2) | Brier score + reliability diagram; the three baselines (base rate, verbalized confidence, retrieval-no-history) runnable. |
-| 1.5 | **Reading-choice experiment (C3)** | 5,000-doc pool, 200-doc budget, 3 arms (agent / random / round-robin), held-out exam authored **before** any arm runs. |
+| 1.5 | **Reading-choice experiment (C3)** | 5,000-doc pool + 1,000-question exam built from HotpotQA per the recipe in `CORPUS.md` §3 — **hash-frozen before any arm runs**. 3 arms (agent / random / round-robin), 200-doc budget each. Scores per arm: answer EM/F1, **gold-doc recall**, supporting-fact precision. |
 | 1.6 | Ablation framework (C5) | Every subsystem disableable by config flag; harness re-runs C1–C4 per ablation. |
 | 1.7 | Collapse tripwires | Weekly type-token ratio + distinct-n on a fixed prompt set; frozen 200-item capability benchmark. |
+| 1.8 | **Corpus acquisition** *(prerequisite for 1.1–1.6)* | Fixed, offline, **version-pinned** corpus downloaded and indexed. Provides: disjoint domains A/B for C1, the ~5k pool + coupled held-out exam for C3, gold-answer QA for C2, frozen benchmark for C4. See `docs/v2/CORPUS.md`. | 🔴 |
 
 **Phase gate: C3 and C5 run end-to-end against a stub agent.** If we cannot run
 C3, we cannot tell progress from noise. **This gate does not get skipped.**
@@ -73,16 +74,35 @@ C3, we cannot tell progress from noise. **This gate does not get skipped.**
 | # | Task | Definition of Done | Metric |
 |---|---|---|---|
 | 2.1 | Foundation | Ollama + Qwen3-8B + Qwen3-Embedding-0.6B; one SQLite file with `sqlite-vec` + FTS5; episode stream schema. | process restart restores all state |
-| 2.2 | Ingest + perception | Chunk, embed, LLM claim-extraction with provenance to source span. **Reuses v1's polite browser** (robots.txt, rate limits, paywall blocklist). | claims/doc; % with valid provenance |
+| 2.2 | Ingest + perception | Chunk, embed, LLM claim-extraction with provenance to source span — **from the fixed local corpus (1.8), not the web.** | claims/doc; % with valid provenance |
 | 2.3 | Hybrid retrieval | BM25 ∪ vector → RRF → reranker; Generative-Agents scoring prior. | recall@10 on 50-query gold set |
 | 2.4 | **Intrinsic motivation** | World-model MLP + RND + LP-per-cluster + UCB1 bandit. ~150 lines. | LP curve rises then falls per topic |
 | 2.5 | Sleep pass | HDBSCAN cluster → LLM reflections with `parent_ids` → claims → NLI contradictions → Beta trust update. | contradictions found; trust separates good/bad sources |
 | 2.6 | Calibration | Semantic entropy (k=8 + NLI clustering) + ECE dashboard. | **C2** |
 | 2.7 | Learned ranker (L2) | Nightly LightGBM refit on citation labels; replaces the fixed prior. | recall@10 improves over 2.3 |
 
-**Explicitly NOT in Phase 2:** LoRA/weight training (blocked on AMD *and*
-deferred on merit), GUI, voice layer, audio, multimodal, 24/7 autonomous loop,
-multi-agent. *(v1 shipped a 1,959-line `voice.py` that produced zero knowledge.)*
+**Explicitly NOT in Phase 2:** **web crawling/auto-pull** (see below), LoRA/weight
+training (deferred on merit), GUI, voice layer, audio, multimodal, 24/7
+autonomous loop, multi-agent. *(v1 shipped a 1,959-line `voice.py` that produced
+zero knowledge.)*
+
+> ### Why web ingestion is deliberately deferred
+>
+> It is not merely "later tooling" — during Phases 1–3 it would **actively
+> invalidate the experiments**:
+> - **Non-reproducible.** Two twins for C1 would read different pages on
+>   different days, so divergence could not be attributed to the agent rather
+>   than to the internet.
+> - **Uncontrolled pool.** C3 compares agent-choice against random over a *fixed*
+>   200-of-5,000 budget. An open web has no denominator.
+> - **Benchmark contamination.** Live pages can contain the answers to the very
+>   exam questions being used to score it.
+> - **Confounded failure.** v1 could never separate "bad extraction" from "bad
+>   diet" because both varied at once.
+>
+> v1's polite browser (robots.txt, rate limiting, paywall blocklist) is
+> **KEEP-as-is** in the salvage audit and gets ported in **Phase 4**, once
+> reading quality is measurable on a fixed corpus first.
 
 ---
 
@@ -149,5 +169,6 @@ redesign it rather than building on top of it.
 | — | ~~No weight training in v2 (AMD blocks QLoRA)~~ **CORRECTED** | The AMD claim was **wrong**: bitsandbytes has a stable ROCm backend with Windows wheels covering gfx120X/RDNA4, and Unsloth ships official AMD support built with AMD. QLoRA on 8B is achievable on this card. Weight training stays **deferred on merit only** (collapse risk; unmeasurable until C4) — a reversible scheduling call, not a hardware wall. |
 | — | **Not Ollama; `llama-server` directly** | Performance, not lock-in: Ollama's llama.cpp vendoring lags months, benchmarking ~34 t/s vs 52–56 t/s upstream on AMD — a 54–65% tax. Ollama remains a drop-in fallback since it speaks the same API. |
 | — | **Small trainable models run on CPU** | 5 M-param MLPs are kernel-launch-bound on a GPU below batch ~1024; CPU is both faster here and fully portable, and leaves the GPU free for the 8B. |
+| — | **Fixed offline corpus; web crawling deferred to Phase 4** | The corpus is the experimental apparatus. Crawling is non-reproducible (twins would read different pages), gives C3 no denominator, and risks benchmark contamination. HotpotQA + its own 5.2 M-doc Wikipedia dump chosen because it is the only source shipping corpus, questions, gold answers **and per-sentence supporting-fact labels** together — so we can measure whether the agent chose to read the *right documents*, not just whether it answered. See `docs/v2/CORPUS.md`. |
 | — | **Eval harness before agent** | The single change most likely to prevent a repeat of v1 |
 | — | v1 kept alongside v2, not deleted | Reference, comparison baseline, and the launchers still work |
