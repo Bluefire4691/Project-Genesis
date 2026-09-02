@@ -73,7 +73,7 @@ C3, we cannot tell progress from noise. **This gate does not get skipped.**
 
 | # | Task | Definition of Done | Metric |
 |---|---|---|---|
-| 2.1 | Foundation | Ollama + Qwen3-8B + Qwen3-Embedding-0.6B; one SQLite file with `sqlite-vec` + FTS5; episode stream schema. | process restart restores all state |
+| 2.1 | Foundation | `llama-server` (Qwen3-8B Q4_K_M + Qwen3-Embedding-0.6B) behind the 0.2 backend interfaces; one SQLite file with `sqlite-vec` + FTS5; episode stream schema. | process restart restores all state |
 | 2.2 | Ingest + perception | Chunk, embed, LLM claim-extraction with provenance to source span — **from the fixed local corpus (1.8), not the web.** | claims/doc; % with valid provenance |
 | 2.3 | Hybrid retrieval | BM25 ∪ vector → RRF → reranker; Generative-Agents scoring prior. | recall@10 on 50-query gold set |
 | 2.4 | **Intrinsic motivation** | World-model MLP + RND + LP-per-cluster + UCB1 bandit. ~150 lines. | LP curve rises then falls per topic |
