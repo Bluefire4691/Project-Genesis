@@ -2,3 +2,7 @@
 data/
 *.db-shm
 *.db-wal
+
+# Generated evaluation reports
+knowledge_eval_report.txt
+falsification_report.txt
