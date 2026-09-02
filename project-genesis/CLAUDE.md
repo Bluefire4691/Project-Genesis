@@ -183,15 +183,43 @@ duplication; the roadmap is the authoritative source of truth for project state.
 
 ---
 
+> ## ⚠️ PROJECT PIVOTED — READ `PROJECT_BOARD.md` FIRST
+>
+> This document describes **v1**, the symbolic architecture. v1 measurably
+> plateaued: 89 relations, 162 concepts, 2-hop maximum reasoning chains, and six
+> subsystems (goals, values, inference programs, contradictions, belief
+> revision, source trust) that never produced a single row outside of tests.
+>
+> **Root cause:** open-domain relation extraction was implemented with 30
+> regexes emitting sentence fragments, so every faculty above it computed over a
+> graph with no structure in it.
+>
+> v2 is being built in parallel using modern ML (local LLM extraction,
+> embeddings, prediction-error-driven motivation, learned retrieval). v1 is
+> retained as reference and comparison baseline. See `PROJECT_BOARD.md`,
+> `docs/v2/`.
+>
+> **Two rules below are formally REVERSED for v2** — see the Ledger in
+> `PROJECT_BOARD.md`.
+
 ## What Not To Do
 
 - Don't add error handling for scenarios that can't happen. Trust the survival layer.
 - Don't remove or bypass lower layers to make higher-layer code simpler.
-- Don't use LLM API calls to build knowledge. Genesis accumulates knowledge from
-  processed input — the Claude API is used only as an expression layer (M32 voice),
-  conditioned strictly on Genesis's own internal state. It cannot add facts Genesis
-  doesn't hold.
-- Don't benchmark against GPT/Claude/etc. That's not the competition.
+- ~~Don't use LLM API calls to build knowledge.~~ **REVERSED for v2.** The
+  blank-slate rule forced solving open-domain NLP with regex as a precondition
+  for testing any cognition, and that is what killed v1. In v2 a **local** LLM is
+  a linguistic organ (extraction, reflection, phrasing); all accumulated state
+  stays in Genesis's own memory with provenance. The individuality claim moves
+  to memory + retrieval + world model, where it is **measurable** (see
+  `docs/v2/EVALUATION.md`, criterion C1).
+- ~~Don't benchmark against GPT/Claude/etc.~~ **REVERSED for v2.** Not as a
+  capability race — but v2 must beat explicit null models (a RAG chatbot with a
+  scheduler; a random reading scheduler; verbalized LLM confidence) or it has
+  demonstrated nothing. Unfalsifiable success criteria are what let eight months
+  pass without a verdict.
+- **New for v2: don't ship a component that no metric misses.** If disabling it
+  doesn't degrade a named measurement, delete it (criterion C5).
 - Don't add a 2D embodiment layer without revisiting the architecture amendment
   (Section 3 of `docs/architecture_amendment_v0.2.md` — declined with reasoning).
 - Don't commit to main/master. Branch is `claude/extract-genesis-repo-fn5vW`.
