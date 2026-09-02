@@ -19,38 +19,144 @@ parameter — and makes the substrate itself the thing that changes.**
 
 ---
 
-## 1. The AMD constraint (read this first)
+## 1. Hardware portability is a first-class requirement
 
-| Capability | Status on RX 9070 XT / Windows |
+**Design principle: the engine runs on anything. CUDA is an optimization, never
+an assumption.**
+
+Rationale: CUDA lock-in is a strategic risk, not merely a preference. Export
+controls have already pushed a large share of the industry onto alternative
+silicon (Huawei Ascend, Cambricon, Moore Threads), and any architecture that
+assumes NVIDIA inherits that fragility. Portability is cheap to design in now
+and expensive to retrofit.
+
+### RETRACTED: "AMD blocks LoRA fine-tuning"
+
+That claim was wrong. Corrections, with sources:
+
+| Claim I made | Reality |
 |---|---|
-| LLM inference | ✅ Fine. Ollama ships ROCm Windows support; llama.cpp Vulkan is a strong fallback and often beats ROCm on Windows. |
-| Embeddings | ✅ Fine (also runs on CPU). |
-| Small PyTorch models (world model, RND, ranker) | ✅ Fine — few-MB models; ROCm or plain CPU both work. |
-| **QLoRA / bitsandbytes fine-tuning** | ❌ **Effectively blocked.** bitsandbytes is CUDA-only; the Windows+ROCm training stack is not viable for a solo dev. |
+| "bitsandbytes is CUDA-only" | **False.** The ROCm backend is out of preview and stable as of the 0.50.x line, with published Windows wheels for ROCm 7.2/7.14, and the target list includes **gfx120X — RDNA4, i.e. this exact card**. Intel XPU/CPU stable; Apple MPS in beta. |
+| "The Windows+ROCm training stack isn't viable" | **False.** [Unsloth ships official AMD support](https://unsloth.ai/docs/get-started/install/amd), built with AMD's engineering team, covering RDNA3/3.5/**4** across Windows, WSL, and Linux, one-line install. |
+| "QLoRA on 8B is out of scope" | **Possible today** on this hardware — via WSL2+ROCm+Unsloth (highest confidence) or native Windows ROCm (works, preview-grade). |
 
-**Consequence:** weight-level learning (adapters) is **out of scope for v2**.
+**What *is* actually true:** bf16 LoRA on an 8B does not fit in 16 GB — because
+8B in bf16 is 16 GB of *weights alone*, before activations or optimizer state.
+That is a **VRAM** limit that applies identically to an RTX 4080. The fix is
+4-bit (QLoRA at NF4 ≈ 5.5 GB), which this card can do. The conclusion ("we need
+4-bit") was right; the premise ("AMD can't") was wrong.
 
-This is not a loss. Both the red team and the ML architect independently
-recommended deferring it: highest collapse risk, slowest feedback, unmeasurable
-until C4 exists. If it's ever wanted, the path is a rented GPU-hour producing a
-versioned GGUF adapter — an offline, gated, optional job, never a runtime
-dependency.
+Weight training remains **deferred in v2 on merit** — collapse risk, slow
+feedback, unmeasurable until C4 exists — but it is now a *scheduling* decision
+we can reverse, not a hardware wall.
 
-**So v2's learning lives in L1–L3 below, and that is enough to be interesting.**
+### Measured backend performance (RDNA4, Llama-2-7B Q4_0)
+
+| Backend | Prefill (pp512) | Decode (tg128) |
+|---|---|---|
+| ROCm/HIP + flash-attn | **4,903 t/s** | 97.3 t/s |
+| Vulkan | 1,943 t/s | **124 t/s** |
+
+**ROCm wins prefill; Vulkan wins decode.** The split is real and
+workload-dependent — which is why backend selection is *measured at startup*,
+not guessed (§2). For reference, the Vulkan-vs-CUDA portability tax on NVIDIA is
+~10% decode / ~25–35% prefill: a tolerable price, not a disqualifier.
+
+*Caveat: Windows ROCm measures ~30% slower decode than Linux on the same
+hardware. WSL2 or dual-boot is the lever if we ever want that back.*
+
+---
+
+## 2. The compute abstraction (portability layer)
+
+**Inference: `llama-server` (llama.cpp) directly, over its OpenAI-compatible
+HTTP API.** One binary serves generation, embeddings (`--embeddings`), and
+reranking (`--reranking --pooling rank`); one model format (GGUF); and the
+widest backend coverage in the industry — CUDA, ROCm/HIP, Vulkan, SYCL, Metal,
+OpenCL, **CANN (Huawei Ascend)**, **MUSA (Moore Threads)**, OpenVINO, ExecuTorch,
+Snapdragon, IBM Z. The same `.gguf` runs on all of them.
+
+> **Not Ollama.** Not for lock-in reasons — it speaks the same API and stays a
+> drop-in fallback — but for measured performance. Its llama.cpp vendoring lags
+> months behind, and on AMD it currently benchmarks **~34 t/s vs 52–56 t/s
+> upstream: a 54–65% throughput tax** on exactly this hardware class.
+
+**Four interfaces, and nothing more:**
+
+```
+LLMBackend        .generate(messages, **params) -> str
+                  .generate_stream(...)         -> Iterator[str]
+                  .tokenize(text)               -> list[int]
+                  .capabilities()               -> {ctx_len, json_schema, ...}
+
+EmbeddingBackend  .embed(texts, kind={"query","doc"}) -> np.ndarray
+                  .dim -> int
+
+RerankBackend     .rerank(query, docs) -> list[float]
+
+TrainerBackend    .fit_step(batch) -> loss; .predict(x); .save/.load(path)
+```
+
+Everything returns **plain Python / NumPy**. `np.ndarray` is the lingua franca
+at the boundary — never a `torch.Tensor`, never a device handle.
+
+**Startup capability probe** (~50 lines, cached, re-run on driver change):
+enumerate available runtimes → rank against a **declarative preference table in
+config, not code** → **micro-benchmark on first run** (64-token prefill +
+32-token decode, <5 s) and persist the winner *per workload*. That is what
+resolves the ROCm-prefill / Vulkan-decode split automatically instead of by
+guesswork. Emit a capability banner to the log and `/health`: a long-running
+agent must be able to say what silicon it woke up on.
+
+**Must NEVER cross the boundary:**
+- Tensors, device objects, dtypes, streams, memory handles.
+- The strings `cuda`, `rocm`, `vulkan`, `nvidia`, `amd` anywhere outside
+  `backends/` and the probe. **Enforce with a CI grep** — the single most
+  effective automatable guard.
+- Model formats/paths (GGUF vs safetensors is a backend detail; callers ask for
+  `"llm.main"`), quantization vocabulary (Q4_K_M/NF4), sampling-parameter
+  dialects, tokenizer identity.
+- Backend errors — catch and re-raise as `BackendUnavailable` / `OutOfMemory` /
+  `ContextOverflow`, actionable without knowing who threw them.
+
+**Model identity is a config alias, not a filename** (`llm.reflect →
+qwen3-8b-q4km`). Swapping silicon and swapping model then become the same
+one-line change — which is the actual test of whether the abstraction holds.
+
+**Non-Western accelerators — honest position:** llama.cpp carries first-party
+CANN and MUSA backends in-tree, so a GGUF inference layer *should* run on Ascend
+and Moore Threads unchanged; PyTorch reaches them via out-of-tree device
+registration (torch_npu tracks PyTorch 2.10; torch_musa lags at 2.5). We will
+not have this hardware to test on, and operator gaps appear as runtime errors,
+not build errors. **So: keep the abstraction clean, write nothing
+vendor-specific, and describe this as "should work, unverified" — never as
+"supported."**
 
 ---
 
 ## 2. Model roster (all local, fits 16 GB)
 
-| Role | Model | ~VRAM | Trainable? |
+| Role | Model | Runs on | Trainable? |
 |---|---|---|---|
-| Reasoner / extractor / reflector | **Qwen3-8B-Instruct** GGUF Q4_K_M | ~5 GB | **Frozen forever** |
-| Embeddings | **Qwen3-Embedding-0.6B** (1024-d, Matryoshka → 512) | ~1.2 GB | **Frozen forever** |
-| Reranker | **Qwen3-Reranker-0.6B** cross-encoder | ~1.2 GB | Frozen |
-| Entailment (contradictions) | DeBERTa-v3-large-MNLI class, or the 8B with a fixed rubric | ~1 GB | Frozen |
-| **World model** | 2-layer MLP on frozen embeddings, predicts next chunk embedding | ~5 M params | **Trained continuously** |
-| **RND novelty** | frozen random target net + trained predictor net | ~2 M params | **Trained continuously** |
-| **Retrieval ranker** | LightGBM / tiny MLP over retrieval features | ~10 K params | **Retrained nightly** |
+| Reasoner / extractor / reflector | **Qwen3-8B-Instruct** GGUF Q4_K_M (~5 GB) | any llama.cpp backend | **Frozen forever** |
+| Embeddings | **Qwen3-Embedding-0.6B** (1024-d, Matryoshka → 512) | same `llama-server` | **Frozen forever** |
+| Reranker | **Qwen3-Reranker-0.6B** cross-encoder | same `llama-server` | Frozen |
+| Entailment (contradictions) | DeBERTa-v3-MNLI class, or the 8B with a fixed rubric | GGUF or ONNX-CPU | Frozen |
+| **World model** | 2-layer MLP on frozen embeddings → next chunk embedding | **CPU** (~5 M params) | **Trained continuously** |
+| **RND novelty** | frozen random target net + trained predictor net | **CPU** (~2 M params) | **Trained continuously** |
+| **Retrieval ranker** | LightGBM / tiny MLP over retrieval features | **CPU** (~10 K params) | **Retrained nightly** |
+
+**All three trainable models run on CPU, and that is the fast choice, not a
+compromise.** A 5 M-param MLP is ~3×10⁷ FLOP/sample; a modern Ryzen sustains
+100–400 GFLOP/s, giving ~5–13 k samples/s — while on a GPU these are dominated
+by kernel-launch overhead (~100–200 µs/step before any math). Below roughly
+batch 1024 the CPU wins outright. It also leaves the GPU entirely free for the
+8B, which is where VRAM contention actually lives, and costs zero vendor
+dependencies. `device` stays configurable; the default is `cpu`.
+
+*Validation gotcha:* some Qwen3-Reranker GGUF conversions ship without
+`cls.output.weight` and silently emit ~1e-23 scores. **Assert on a known pair at
+startup.**
 
 **Two frozen-forever commitments.** The embedder is frozen because re-embedding
 invalidates the whole memory store and silently rewrites the agent's past. The
@@ -153,7 +259,13 @@ replay buffer. Its error **is** the intrinsic reward. As a domain is learned,
 error drops, LP drops, and the entity moves on — curiosity that terminates
 honestly.
 
-**L4 — Identity adapter: OUT OF SCOPE** (AMD; and deferred on merit anyway).
+**L4 — Identity adapter: DEFERRED, not blocked.** QLoRA on the 8B is achievable
+on this hardware (WSL2+ROCm+Unsloth, or native Windows ROCm+bitsandbytes). It is
+deferred because it carries the highest collapse risk, the slowest feedback
+loop, and is **unmeasurable until C4 retention batteries exist** — not because
+of the GPU vendor. Revisit after Phase 3. When revisited: versioned GGUF
+adapters, ≥50% real external text in every batch, frozen-eval gate,
+auto-rollback.
 
 ---
 

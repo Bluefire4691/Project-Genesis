@@ -39,7 +39,8 @@ accumulated individuality, calibrated self-knowledge.
 | # | Task | Definition of Done | Priority |
 |---|---|---|---|
 | 0.1 | **Back up the live databases** | `backup_genesis_data.bat` run; copy stored **off** the machine. `interaction_log.db` (4,580 conversations) is irreplaceable and one `del` away from gone. | 🔴 **DO TODAY** |
-| 0.2 | Hardware spike | Ollama running on the 9070 XT; ROCm vs Vulkan benchmarked; tok/s recorded for Qwen3-8B Q4_K_M. | 🔴 |
+| 0.2 | **Compute abstraction + capability probe** | Four backend interfaces (`LLMBackend`, `EmbeddingBackend`, `RerankBackend`, `TrainerBackend`), NumPy-only boundary, startup probe that enumerates available runtimes and **micro-benchmarks** to pick per-workload winners. CI grep rejecting vendor strings outside `backends/`. | 🔴 |
+| 0.2b | Backend spike | `llama-server` built with both ROCm and Vulkan; pp512/tg128 recorded for Qwen3-8B Q4_K_M; winners pinned per workload by measurement, not guess. | 🔴 |
 | 0.3 | **Falsification test on v1** | Swap `processors/text.py` regexes for a local-LLM extractor emitting canonical triples. Re-run `knowledge_eval.py`. **Question: does inference reach rise above zero and stay there?** | 🔴 |
 | 0.4 | Decide: patch or rebuild | If 0.3 lights up the graph → v1 salvage is real and v2 inherits a working corpus. If chains still don't form → the bottleneck is architectural, rewrite is justified. **Either way we learn it in a week, not a year.** | 🔴 |
 
@@ -144,6 +145,9 @@ redesign it rather than building on top of it.
 | — | **Pivot to modern ML** | v1 measurably plateaued: 89 relations, 2-hop max, 6 subsystems with 0 rows |
 | — | **Reverse the "no pretrained weights" rule** | It forced solving open-domain NLP with regex as a precondition for everything else. The LLM is a *linguistic organ*; accumulated state stays in Genesis's own memory — the individuality claim moves to memory + retrieval + world model, where it can be measured |
 | — | **Local-only confirmed** | Continuity and individuality claims are incoherent if the mind runs in someone else's datacenter |
-| — | **No weight training in v2** | AMD/ROCm blocks QLoRA *and* both reviewers deferred it on merit (collapse risk, unmeasurable until C4) |
+| — | **Hardware portability is a first-class requirement** | CUDA lock-in is a strategic risk, not a preference — export controls have already moved much of the industry onto alternative silicon. `llama.cpp`/GGUF chosen for the widest backend coverage (CUDA, ROCm, Vulkan, SYCL, Metal, CANN/Ascend, MUSA). Backend selection is **measured at startup**, never assumed. Vendor strings are a lint failure outside `backends/`. |
+| — | ~~No weight training in v2 (AMD blocks QLoRA)~~ **CORRECTED** | The AMD claim was **wrong**: bitsandbytes has a stable ROCm backend with Windows wheels covering gfx120X/RDNA4, and Unsloth ships official AMD support built with AMD. QLoRA on 8B is achievable on this card. Weight training stays **deferred on merit only** (collapse risk; unmeasurable until C4) — a reversible scheduling call, not a hardware wall. |
+| — | **Not Ollama; `llama-server` directly** | Performance, not lock-in: Ollama's llama.cpp vendoring lags months, benchmarking ~34 t/s vs 52–56 t/s upstream on AMD — a 54–65% tax. Ollama remains a drop-in fallback since it speaks the same API. |
+| — | **Small trainable models run on CPU** | 5 M-param MLPs are kernel-launch-bound on a GPU below batch ~1024; CPU is both faster here and fully portable, and leaves the GPU free for the 8B. |
 | — | **Eval harness before agent** | The single change most likely to prevent a repeat of v1 |
 | — | v1 kept alongside v2, not deleted | Reference, comparison baseline, and the launchers still work |
