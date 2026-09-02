@@ -74,6 +74,7 @@ RUNNING
     python falsification_test.py --corpus both
 
     python falsification_test.py --corpus live --limit 100
+    python falsification_test.py --corpus live --glossary   # + entity linking
     python falsification_test.py --url http://localhost:8080/v1/chat/completions
     python falsification_test.py --offline        # force Arm B N/A
     python falsification_test.py --repeat 2       # feed the corpus twice

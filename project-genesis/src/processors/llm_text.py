@@ -864,24 +864,24 @@ def _load_json(raw: str) -> Any:
     text = raw.strip()
     if not text:
         return None
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    # Strip ``` fences
+
+    # Candidate JSON spans, cheapest first. A failure here is not swallowed:
+    # when every candidate fails, _parse_triples logs the failure and records
+    # it in extracted["error"].
+    candidates: list[str] = [text]
+
     fenced = re.search(r"```(?:json)?\s*(.+?)```", text, re.S)
     if fenced:
-        try:
-            return json.loads(fenced.group(1).strip())
-        except Exception:
-            pass
-    # First balanced {...} or [...] span
+        candidates.append(fenced.group(1).strip())
+
     for opener, closer in (("{", "}"), ("[", "]")):
-        start = text.find(opener)
-        end = text.rfind(closer)
+        start, end = text.find(opener), text.rfind(closer)
         if 0 <= start < end:
-            try:
-                return json.loads(text[start:end + 1])
-            except Exception:
-                continue
+            candidates.append(text[start:end + 1])
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except (ValueError, TypeError):
+            continue        # try the next span
     return None

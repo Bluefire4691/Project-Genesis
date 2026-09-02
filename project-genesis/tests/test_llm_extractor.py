@@ -450,7 +450,43 @@ def test_diagnostics_counters():
 
 
 # ======================================================================
-# 8 — End-to-end through the graph (still no model)
+# 8 — Cross-document glossary (opt-in entity linking)
+# ======================================================================
+
+def _recording_transport(payload: str, seen: list[str]):
+    def _call(_system: str, user: str) -> str:
+        seen.append(user)
+        return payload
+    return _call
+
+
+PAYLOAD_ONE = ('{"triples": [{"subject": "wolves", "relation": "PREDATES", '
+               '"object": "elk", "confidence": 0.9}]}')
+
+
+def test_glossary_is_off_by_default():
+    seen: list[str] = []
+    p = LLMTextProcessor(transport=_recording_transport(PAYLOAD_ONE, seen))
+    p.process(TEXT)
+    p.process(TEXT)
+    assert p.diagnostics()["glossary"] is False
+    assert "Names already used" not in seen[-1]
+
+
+def test_glossary_feeds_known_names_into_later_prompts():
+    seen: list[str] = []
+    p = LLMTextProcessor(transport=_recording_transport(PAYLOAD_ONE, seen),
+                         glossary=True)
+    p.process(TEXT)
+    assert "Names already used" not in seen[0], "first call has nothing to show"
+    p.process(TEXT)
+    assert "Names already used" in seen[1]
+    assert "wolves" in seen[1] and "elk" in seen[1]
+    assert p.diagnostics()["glossary_names"] == 2
+
+
+# ======================================================================
+# 9 — End-to-end through the graph (still no model)
 # ======================================================================
 
 def test_extracted_triples_are_accepted_by_the_relation_graph(tmp_path):
