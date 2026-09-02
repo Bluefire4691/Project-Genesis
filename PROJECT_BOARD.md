@@ -5,7 +5,7 @@
 **Team artifacts:** [`docs/v2/RESEARCH_SURVEY.md`](docs/v2/RESEARCH_SURVEY.md) ·
 [`docs/v2/ARCHITECTURE_V2.md`](docs/v2/ARCHITECTURE_V2.md) ·
 [`docs/v2/EVALUATION.md`](docs/v2/EVALUATION.md) ·
-[`docs/v2/SALVAGE_AUDIT.md`](docs/v2/SALVAGE_AUDIT.md) · [`docs/v2/CORPUS.md`](docs/v2/CORPUS.md)
+[`docs/v2/SALVAGE_AUDIT.md`](docs/v2/SALVAGE_AUDIT.md) · [`docs/v2/CORPUS.md`](docs/v2/CORPUS.md) · [`docs/v2/EPISTEMICS.md`](docs/v2/EPISTEMICS.md)
 
 ---
 
@@ -74,12 +74,14 @@ C3, we cannot tell progress from noise. **This gate does not get skipped.**
 | # | Task | Definition of Done | Metric |
 |---|---|---|---|
 | 2.1 | Foundation | `llama-server` (Qwen3-8B Q4_K_M + Qwen3-Embedding-0.6B) behind the 0.2 backend interfaces; one SQLite file with `sqlite-vec` + FTS5; episode stream schema. | process restart restores all state |
+| 2.1b | **Epistemic schema** *(land with 2.1 — retrofit is expensive)* | Typed `edge` table incl. the 3 defeat types; `span` at sentence granularity + `canonical_span_id`; `claim.claim_kind` + `epistemic_marker`; **two separate trust tables** with a CI-enforced no-join invariant; `abstained` outcome logged; normative tables as **empty DDL**. See `docs/v2/EPISTEMICS.md` §3. | schema migration passes; CI grep blocks any `source_trust`⋈`holder_authority` join |
 | 2.2 | Ingest + perception | Chunk, embed, LLM claim-extraction with provenance to source span — **from the fixed local corpus (1.8), not the web.** | claims/doc; % with valid provenance |
 | 2.3 | Hybrid retrieval | BM25 ∪ vector → RRF → reranker; Generative-Agents scoring prior. | recall@10 on 50-query gold set |
 | 2.4 | **Intrinsic motivation** | World-model MLP + RND + LP-per-cluster + UCB1 bandit. ~150 lines. | LP curve rises then falls per topic |
 | 2.5 | Sleep pass | HDBSCAN cluster → LLM reflections with `parent_ids` → claims → NLI contradictions → Beta trust update. | contradictions found; trust separates good/bad sources |
 | 2.6 | Calibration | Semantic entropy (k=8 + NLI clustering) + ECE dashboard. | **C2** |
 | 2.7 | Learned ranker (L2) | Nightly LightGBM refit on citation labels; replaces the fixed prior. | recall@10 improves over 2.3 |
+| 2.8 | **Cite-or-abstain** | Answer only when spans can be cited; otherwise abstain. Scored against HotpotQA gold supporting-fact labels. **This is the shippable version of "knows what it knows."** | **C6** — coverage/accuracy curve; supporting-fact precision |
 
 **Explicitly NOT in Phase 2:** **web crawling/auto-pull** (see below), LoRA/weight
 training (deferred on merit), GUI, voice layer, audio, multimodal, 24/7
@@ -129,6 +131,8 @@ redesign it rather than building on top of it.
 | 4.1 | Monthly retention batteries | **C4** — month-1 retention ≥90% at month 4 |
 | 4.2 | Long-run divergence | Twin Jaccard keeps falling; no collapse tripwire fires |
 | 4.3 | *(Optional, gated)* Identity adapter | Only via rented GPU-hour; versioned GGUF, frozen-eval gate, auto-rollback. **Not required for success.** |
+| 4.4 | *(Gated)* **Legal reasoning layer — LAW ONLY** | Ingest US Code (USLM XML) / CourtListener / EUR-Lex with `(jurisdiction, authority_level, effective_from/to)` mandatory. Answers "what does §X say, in which jurisdiction, as of when" with a citation trace and a shown `lex specialis` resolution — never "X is wrong." **Gate: C3 + C5 passed · trust posteriors demonstrably separate good/bad sources · ≥90% span-valid provenance · C6 precision floor met · T10–T14 written BEFORE build.** |
+| — | **Ethics layer** | ❌ **DON'T BUILD.** No sourced normative corpus exists (all public datasets record aggregate crowd majorities, not *who holds the norm*). Delphi failed publicly on exactly this. Revisit only if 4.4 clears T10–T14 with an expert-labeled set in hand. |
 
 ---
 
