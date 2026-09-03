@@ -58,42 +58,68 @@ else {
     Say '[1/3] Looking up the latest llama.cpp release...'
     New-Item -ItemType Directory -Force -Path $LlamaDir | Out-Null
 
+    # /releases/latest EXCLUDES prereleases, and llama.cpp ships its Windows
+    # binaries as frequent tagged builds (b6234-style) that are often marked
+    # prerelease -- so /latest can return an unrelated old tag with no assets.
+    # Page through /releases (which includes prereleases) and take the newest
+    # release that actually HAS a matching asset.
     try {
-        $rel = Invoke-RestMethod 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest' `
-                                 -Headers @{ 'User-Agent' = 'genesis-setup' }
+        $releases = Invoke-RestMethod `
+            'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=30' `
+            -Headers @{ 'User-Agent' = 'genesis-setup' }
     }
     catch {
         Bad "Could not reach the GitHub API: $($_.Exception.Message)"
         Say ''
         Say 'MANUAL FALLBACK:' 'Yellow'
-        Say '  1. Open https://github.com/ggml-org/llama.cpp/releases/latest'
+        Say '  1. Open https://github.com/ggml-org/llama.cpp/releases'
         Say "  2. Download the asset named like:  llama-<build>-bin-win-$Backend-x64.zip"
-        Say "  3. Extract it so that llama-server.exe sits directly in:"
+        Say '  3. Extract it so llama-server.exe sits directly in:'
         Say "     $LlamaDir"
         Say '  4. Re-run this script.'
         exit 1
     }
 
-    # Match the requested backend, then fall back to anything Windows/x64.
+    # RX 9070 XT is RDNA4. On llama.cpp, ROCm/HIP wins prefill and Vulkan
+    # often wins decode -- both are real GPU paths. Vulkan needs no toolchain,
+    # so it stays the default; 'rocm' is available once this baseline works.
     $patterns = switch ($Backend) {
-        'vulkan' { @('*win*vulkan*x64*.zip', '*win*vulkan*.zip') }
-        'rocm'   { @('*win*hip*x64*.zip', '*win*rocm*x64*.zip', '*win*hip*.zip') }
+        'vulkan' { @('*win*vulkan*x64*.zip', '*vulkan*x64*.zip', '*win*vulkan*.zip') }
+        'rocm'   { @('*win*hip*x64*.zip', '*win*rocm*x64*.zip',
+                     '*hip*radeon*.zip', '*win*hip*.zip') }
         'cpu'    { @('*win*cpu*x64*.zip', '*win*avx2*x64*.zip', '*win*x64*.zip') }
     }
 
-    $asset = $null
-    foreach ($p in $patterns) {
-        $asset = $rel.assets | Where-Object { $_.name -like $p } | Select-Object -First 1
+    $asset = $null; $rel = $null
+    foreach ($r in $releases) {
+        foreach ($p in $patterns) {
+            $hit = $r.assets | Where-Object { $_.name -like $p } | Select-Object -First 1
+            if ($hit) { $asset = $hit; $rel = $r; break }
+        }
         if ($asset) { break }
     }
 
     if (-not $asset) {
-        Bad "No '$Backend' asset in release $($rel.tag_name)."
-        Say 'Available Windows assets:' 'Yellow'
-        $rel.assets | Where-Object { $_.name -like '*win*' } |
-            ForEach-Object { Say "    $($_.name)" }
+        Bad "No '$Backend' asset found in the last $($releases.Count) releases."
         Say ''
-        Say "Re-run with a backend that appears above, e.g. -Backend cpu" 'Yellow'
+        Say 'Windows assets that DO exist in the newest release with any:' 'Yellow'
+        $shown = $false
+        foreach ($r in $releases) {
+            $wins = $r.assets | Where-Object { $_.name -like '*win*' -or $_.name -like '*.zip' }
+            if ($wins) {
+                Say "  release $($r.tag_name):"
+                $wins | Select-Object -First 12 | ForEach-Object { Say "    $($_.name)" }
+                $shown = $true; break
+            }
+        }
+        if (-not $shown) {
+            Say '  (none -- the GitHub API returned releases with no assets at all,'
+            Say '   which usually means a proxy or rate limit is interfering)'
+        }
+        Say ''
+        Say 'EASIEST FIX -- skip llama.cpp entirely and use LM Studio or Ollama.' 'Cyan'
+        Say 'See RUN_FIRST_TEST.md in this folder. Either gives you the same' 'Cyan'
+        Say 'OpenAI-compatible endpoint in about five minutes, no scripting.' 'Cyan'
         exit 1
     }
 
