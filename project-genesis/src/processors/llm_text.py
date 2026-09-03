@@ -417,6 +417,63 @@ def _normalise_endpoint(url: str) -> str:
     return u + "/v1/chat/completions"
 
 
+# Ports the common local servers listen on, in preference order.
+# Discovery exists so nobody has to set an environment variable: whichever
+# server is running gets used.
+_CANDIDATE_PORTS = ((11434, "Ollama"), (8080, "llama.cpp"), (1234, "LM Studio"))
+
+
+def discover_endpoint(timeout: float = 2.0) -> str | None:
+    """Find a running OpenAI-compatible server, or None.
+
+    Order of preference:
+      1. GENESIS_LLM_URL, if set
+      2. a .llm_endpoint file written by start_llm.ps1 (repo root or cwd)
+      3. a probe of the known local ports
+
+    Never raises: an unreachable server is a None, not an exception.
+    """
+    env = os.environ.get("GENESIS_LLM_URL", "").strip()
+    if env:
+        return _normalise_endpoint(env)
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    for base in (os.getcwd(),
+                 os.path.abspath(os.path.join(here, "..", "..")),
+                 os.path.abspath(os.path.join(here, "..", "..", ".."))):
+        marker = os.path.join(base, ".llm_endpoint")
+        try:
+            if os.path.isfile(marker):
+                with open(marker, "r", encoding="utf-8") as fh:
+                    found = fh.read().strip()
+                if found:
+                    return _normalise_endpoint(found)
+        except OSError:
+            pass
+
+    try:
+        import requests
+    except ImportError:
+        return None
+
+    for port, _name in _CANDIDATE_PORTS:
+        try:
+            r = requests.get(f"http://127.0.0.1:{port}/v1/models", timeout=timeout)
+            if r.status_code < 400:
+                return f"http://127.0.0.1:{port}/v1/chat/completions"
+        except Exception:
+            continue
+    return None
+
+
+def describe_endpoint(url: str) -> str:
+    """'Ollama (port 11434)' — so a test report names what produced it."""
+    for port, name in _CANDIDATE_PORTS:
+        if f":{port}" in url:
+            return f"{name} (port {port})"
+    return url
+
+
 # ==================================================================
 # Processor
 # ==================================================================
@@ -462,7 +519,10 @@ class LLMTextProcessor(BaseProcessor):
         transport: Optional[Callable[[str, str], str]] = None,
         glossary: bool = False,
     ):
-        self._url   = _normalise_endpoint(url or os.environ.get("GENESIS_LLM_URL", _DEFAULT_URL))
+        # An explicit url always wins; otherwise discover whichever local
+        # server is actually running, so no environment variable is needed.
+        self._url = (_normalise_endpoint(url) if url
+                     else (discover_endpoint() or _DEFAULT_URL))
         self._model = model or os.environ.get("GENESIS_LLM_MODEL", _DEFAULT_MODEL)
         try:
             self._timeout = float(timeout if timeout is not None

@@ -6,3 +6,9 @@ data/
 # Generated evaluation reports
 knowledge_eval_report.txt
 falsification_report.txt
+
+# Local LLM endpoint marker (written by start_llm.ps1)
+.llm_endpoint
+.llm_model
+llama/
+models/
