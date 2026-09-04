@@ -466,6 +466,48 @@ def discover_endpoint(timeout: float = 2.0) -> str | None:
     return None
 
 
+def discover_model(url: str, timeout: float = 5.0) -> str | None:
+    """Ask the server which model it actually serves.
+
+    This matters because servers disagree: llama-server IGNORES the `model`
+    field, while Ollama REQUIRES an exact match and returns HTTP 404 for
+    anything else. A hardcoded placeholder therefore works against one and
+    fails 100% of calls against the other -- silently, since every failure
+    is caught and turned into an empty relation list.
+
+    Order: GENESIS_LLM_MODEL -> .llm_model marker -> ask /v1/models.
+    Never raises.
+    """
+    env = os.environ.get("GENESIS_LLM_MODEL", "").strip()
+    if env:
+        return env
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    for base in (os.getcwd(),
+                 os.path.abspath(os.path.join(here, "..", "..")),
+                 os.path.abspath(os.path.join(here, "..", "..", ".."))):
+        try:
+            marker = os.path.join(base, ".llm_model")
+            if os.path.isfile(marker):
+                with open(marker, "r", encoding="utf-8") as fh:
+                    name = fh.read().strip()
+                if name:
+                    return name
+        except OSError:
+            pass
+
+    try:
+        import requests
+        models_url = url.replace("/chat/completions", "/models")
+        data = requests.get(models_url, timeout=timeout).json()
+        entries = data.get("data") or []
+        if entries:
+            return entries[0].get("id") or None
+    except Exception:
+        pass
+    return None
+
+
 def describe_endpoint(url: str) -> str:
     """'Ollama (port 11434)' — so a test report names what produced it."""
     for port, name in _CANDIDATE_PORTS:
@@ -519,19 +561,28 @@ class LLMTextProcessor(BaseProcessor):
         transport: Optional[Callable[[str, str], str]] = None,
         glossary: bool = False,
     ):
+        env_offline = os.environ.get("GENESIS_LLM_OFFLINE", "").strip() in {"1", "true", "yes"}
+        self.offline = bool(offline or env_offline)
+
         # An explicit url always wins; otherwise discover whichever local
         # server is actually running, so no environment variable is needed.
+        # Offline never probes the network.
         self._url = (_normalise_endpoint(url) if url
-                     else (discover_endpoint() or _DEFAULT_URL))
-        self._model = model or os.environ.get("GENESIS_LLM_MODEL", _DEFAULT_MODEL)
+                     else (_DEFAULT_URL if self.offline
+                           else (discover_endpoint() or _DEFAULT_URL)))
+
+        # Ask the server what it serves. Ollama 404s on a wrong model name;
+        # llama-server ignores the field, so discovery is safe for both.
+        self._model = (model
+                       or (None if (self.offline or transport is not None)
+                           else discover_model(self._url))
+                       or _DEFAULT_MODEL)
         try:
             self._timeout = float(timeout if timeout is not None
                                   else os.environ.get("GENESIS_LLM_TIMEOUT", _DEFAULT_TIMEOUT))
         except (TypeError, ValueError):
             self._timeout = _DEFAULT_TIMEOUT
 
-        env_offline = os.environ.get("GENESIS_LLM_OFFLINE", "").strip() in {"1", "true", "yes"}
-        self.offline = bool(offline or env_offline)
         self._brain = brain
         self._transport = transport
 
@@ -751,6 +802,16 @@ class LLMTextProcessor(BaseProcessor):
                 return None, self.last_error
 
             if resp.status_code >= 400:
+                body = (resp.text or "")[:300]
+                # A 404 naming the model means the server requires an exact
+                # name (Ollama does; llama-server does not). Re-discover once
+                # and retry rather than failing every call in the run.
+                if attempt == 0 and resp.status_code == 404 and "model" in body.lower():
+                    found = discover_model(self._url)
+                    if found and found != self._model:
+                        self._model = found
+                        payload["model"] = found
+                        continue
                 # A build that rejects json_schema still honours json_object;
                 # retry once in the looser mode before giving up.
                 if attempt == 0 and resp.status_code < 500:
@@ -883,6 +944,10 @@ class LLMTextProcessor(BaseProcessor):
             "unreachable":        self._unreachable,
             "offline":            self.offline,
             "last_error":         self.last_error,
+            # Named so a failed run reports WHAT it tried to talk to, not
+            # just that it failed.
+            "endpoint":           self._url,
+            "model":              self._model,
         }
 
 

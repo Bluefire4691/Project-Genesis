@@ -616,6 +616,29 @@ def report(arm_a: dict, arm_b: dict | None, corpus_name: str = ""):
            f"{d['rejected_relation']} on relation type, "
            f"{d['truncated_outputs']} doc(s) hit the 8-relation cap")
 
+        # A high failure rate means the TRANSPORT broke, not that the model
+        # produced nothing useful. Those two look identical in the table --
+        # both are zeros -- so say which one happened, loudly, and refuse to
+        # let the run be read as a result.
+        calls = d.get("calls") or 0
+        fails = d.get("failures") or 0
+        if calls and fails / calls >= 0.5:
+            pct = 100.0 * fails / calls
+            _p()
+            _p(f"    !! ARM B DID NOT RUN: {fails}/{calls} calls failed ({pct:.0f}%).")
+            _p(f"       Model requested: {d.get('model', '(unknown)')}")
+            _p(f"       Endpoint:        {d.get('endpoint', '(unknown)')}")
+            err = d.get("last_error") or "(not captured)"
+            _p(f"       Last error:      {err}")
+            _p()
+            _p("       These zeros are a broken connection, NOT a finding.")
+            _p("       Common causes:")
+            _p("         HTTP 404 'model not found' -> the server needs an exact")
+            _p("           model name. Set GENESIS_LLM_MODEL, or re-run")
+            _p("           start_llm.bat which writes .llm_model for you.")
+            _p("         Connection refused -> no server on that port.")
+            _p("         Timeout -> model still loading; wait and re-run.")
+
     # ── verdict ──────────────────────────────────────────────────────
     _banner(f"VERDICT — {corpus_name} corpus" if corpus_name else "VERDICT")
     if arm_b is None:
@@ -626,6 +649,23 @@ def report(arm_a: dict, arm_b: dict | None, corpus_name: str = ""):
         _p("    To decide the question, start a local server and re-run:")
         _p("      llama-server -m <model>.gguf -c 8192 --port 8080")
         _p("      python falsification_test.py")
+        return
+
+    # A run where most calls failed produces the same zeros as a run where
+    # the model answered uselessly. Refuse to emit a verdict on the first:
+    # reporting a transport failure as evidence is worse than reporting
+    # nothing, because it would retire the hypothesis on a bug.
+    _d = arm_b.get("diagnostics") or {}
+    _calls, _fails = _d.get("calls") or 0, _d.get("failures") or 0
+    if _calls and _fails / _calls >= 0.5:
+        _p()
+        _p(f"    VOID — Arm B did not run ({_fails}/{_calls} calls failed).")
+        _p()
+        _p("    No verdict. These zeros describe a broken connection to the")
+        _p("    model, not the behaviour of an LLM extractor. See the")
+        _p("    diagnostics above for the exact error and its fix, then re-run.")
+        _p()
+        _p("    Arm A's numbers are real and unaffected.")
         return
 
     rose = arm_b["reach"] > 0
