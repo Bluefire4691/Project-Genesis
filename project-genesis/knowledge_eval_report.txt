@@ -1,0 +1,346 @@
+
+╔══════════════════════════════════════════════════════════════════╗
+║              GENESIS KNOWLEDGE DEVELOPMENT EVALUATION            ║
+║        2026-06-04 14:35  |  Mode: QUICK  |  80 cycles/batch      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+  Tests whether Genesis builds understanding (inference, calibration,
+  growth quality) vs. just storing facts (lookup table behavior).
+  Also surfaces honest architectural gaps without hiding them.
+
+  Running test 1/5: Inference...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TEST 1: RECALL vs. INFERENCE
+  Can Genesis reach conclusions it was never explicitly told?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Causal chain we will teach (each link explicit):
+    wolves → controls → deer
+    deer   → causes   → overgrazing
+    overgrazing → causes → erosion
+    erosion → causes → river change
+
+  What Genesis was never told, but should be able to derive:
+    wolves → ... → overgrazing   (2-hop)
+    wolves → ... → erosion       (3-hop)
+    wolves → ... → river change  (4-hop)
+
+  TEST A: Natural language — feed sentences, see what the text processor extracts.
+  TEST B: Guaranteed chain — inject relations directly, then test pure inference.
+
+  ── Test A: via natural language sentences
+    Cycles run: 72  |  Relations extracted: 12
+    Stored relations for 'wolves': 1
+      wolves CONTROLS deer populations in (conf=0.85)
+    Stored relations for 'deer': 2
+      deer CAUSES overgrazing when their (conf=0.88)
+      deer REQUIRES wolves (conf=0.72)
+    Concepts reached via inference from 'wolves': (none)
+
+  ── Test B: direct injection (tests inference engine in isolation)
+    Relations injected: 4
+      wolves → deer: ✓ stored
+      deer → overgrazing: ✓ stored
+      overgrazing → erosion: ✓ stored
+      erosion → river change: ✓ stored
+
+  ── Inference chain results (Test B — guaranteed input)
+    ✓  wolves → deer [direct]: PATH FOUND 
+         Chain: wolves --CONTROLS--> deer
+    ✓  wolves → overgrazing [2-hop]: PATH FOUND (also in inference table)
+         Chain: wolves --CONTROLS--> deer → deer --CAUSES--> overgrazing
+    ✓  wolves → erosion [3-hop]: PATH FOUND 
+         Chain: wolves --CONTROLS--> deer → deer --CAUSES--> overgrazing → overgrazing --CAUSES--> erosion
+    ✓  wolves → river change [4-hop]: PATH FOUND 
+         Chain: wolves --CONTROLS--> deer → deer --CAUSES--> overgrazing → overgrazing --CAUSES--> erosion → erosion --CAUSES--> river change
+
+  ✅  Inference working: Genesis derived 3 multi-hop conclusions from 1 direct facts.
+      A lookup table has no wolves→erosion entry. Genesis derived it.
+
+  ⚠️   Natural language (Test A) did not produce any inference chains.
+      Text processor may not be extracting typed relations from these sentences. Check wolves' stored relations above. The inference engine itself works (Test B).
+
+  WHY IT MATTERS:
+    This is the line between a filing cabinet and a knowledge system.
+    
+    A filing cabinet stores "wolves → deer" and retrieves it on demand.
+    That's Level 1: recall. A spreadsheet passes this test.
+    
+    Level 2 is inference: given wolves→deer and deer→overgrazing, can it derive
+    wolves→overgrazing without being told? This requires the system to combine
+    what it knows rather than just retrieve what it was told.
+    
+    Test B shows the inference engine in isolation — it works when given clean input.
+    Test A shows whether the text processor extracts clean enough relations from
+    natural language for the inference engine to fire. Both matter.
+
+  [Test 1 done in 4.5s]
+
+  Running test 2/5: Calibrated Ignorance...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TEST 2: CALIBRATED IGNORANCE
+  Does Genesis know what it knows — and what it doesn't?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Feed Genesis content about one topic until it knows it well.
+  Then compare prediction error for:
+    - That topic     (should be LOW — Genesis built a model of it)
+    - Unknown words  (should be HIGH — Genesis has no model)
+
+  Prediction error is Genesis's belief-model surprise signal (Friston, 2010):
+  how unexpected is this concept given everything it has learned?
+  A system with no model has error=1.0 everywhere. A learning system should
+  show measurably lower error for things it has been taught.
+
+  ── Before training
+    [trained] 'wolves': error = 1.0000
+    [trained] 'deer': error = 1.0000
+    [trained] 'overgrazing': error = 1.0000
+    [trained] 'erosion': error = 1.0000
+    [unknown] 'xylotrilobite': error = 1.0000
+    [unknown] 'phlogistocene': error = 1.0000
+    [unknown] 'nullarboria': error = 1.0000
+
+    Training complete — 72 cycles, 12 relations
+
+  ── After training
+    [trained] 'wolves': error = 0.2150  Δ-0.7850
+    [trained] 'deer': error = 0.2000  Δ-0.8000
+    [trained] 'overgrazing': error = 0.1200  Δ-0.8800
+    [trained] 'erosion': error = 1.0000  (unchanged)
+    [unknown] 'xylotrilobite': error = 1.0000  (unchanged)
+    [unknown] 'phlogistocene': error = 1.0000  (unchanged)
+    [unknown] 'nullarboria': error = 1.0000  (unchanged)
+
+  ── Summary
+    Average error — trained topics:  0.3838
+    Average error — unknown topics:  1.0000
+    Gap (unknown − trained):         0.6162
+    Trained concepts that improved: ['wolves', 'deer', 'overgrazing']
+
+  ── Per-concept detail (trained only)
+    'wolves': 1 stored relations, pred_error=0.2150
+    'deer': 2 stored relations, pred_error=0.2000
+    'overgrazing': 1 stored relations, pred_error=0.1200
+    'erosion': 0 stored relations, pred_error=1.0000
+
+  ✅  Calibrated ignorance working. Gap = 0.616.
+      Genesis shows meaningfully lower surprise for concepts it has learned.
+
+  WHY IT MATTERS:
+    A system with no model is equally surprised by everything. Prediction error=1.0
+    for wolves, 1.0 for xylotrilobite — it doesn't know either.
+    
+    A system building a genuine belief model should show lower prediction error for
+    things it has learned. Not because it was told "I know wolves", but because it
+    has accumulated a network of relations around that concept. More relations,
+    higher confidence → lower prediction error.
+    
+    This is the Dunning-Kruger test in reverse: does Genesis know what it knows?
+
+  [Test 2 done in 0.4s]
+
+  Running test 3/5: Contradiction...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TEST 3: CONTRADICTION DETECTION & THE REVISION GAP
+  Does Genesis notice when things conflict? Does it update beliefs?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Feed Genesis two directly contradicting statements about the same subject.
+  Check:
+    1. Did it detect the contradiction?                    (expect: YES)
+    2. Did it lower confidence on the now-contradicted belief?  (expect: NO — honest gap)
+
+  The contradiction detection (M11) fires on opposing relation types.
+  Example: X ENABLES Y and X PREVENTS Y cannot both be true.
+
+  ── Step 1: teach base fact (wolves ENABLES deer — wrong, but planted deliberately)
+    Planted: wolves ENABLES deer survival  (confidence=0.85)
+
+  ── Step 2: teach contradicting fact (wolves PREVENTS deer — conflicts with ENABLES)
+    Contradictions before: 0
+    Contradictions after:  1
+    New contradictions detected: 1
+
+    Contradiction log:
+      'wolves' ENABLES deer survival  ↔  'wolves' PREVENTS deer survival
+      (conf_a=0.85, conf_b=0.90)
+
+  ── Belief revision check
+    Original belief confidence BEFORE contradiction: 0.85
+    Original belief confidence AFTER contradiction:  0.85
+
+  ✅  Contradiction detected: 1 new conflict(s) logged.
+      'wolves ENABLES deer' vs 'wolves PREVENTS deer' flagged as opposing.
+
+  🔲  KNOWN GAP: Belief confidence does NOT change when contradicted.
+      'wolves ENABLES deer' remains at confidence 0.85 even though 'wolves PREVENTS deer' directly contradicts it.
+      Genesis logs the conflict but does not cross out the wrong answer.
+      The relation graph rule: confidence = MAX(existing, new). It only goes up.
+      This is an architectural honest gap, not a test failure.
+
+  WHY IT MATTERS:
+    There are two separate things here:
+    
+    DETECTION (working): Genesis notices when ENABLES and PREVENTS co-exist for
+    the same subject-object pair. It logs the contradiction. This is like a student
+    writing "!?" in the margin — they noticed something is wrong.
+    
+    REVISION (not working yet): The student needs to also cross out the wrong
+    answer and update their understanding. Genesis doesn't do this yet.
+    confidence only goes up via MAX(existing, new). New contradicting evidence
+    doesn't lower the confidence of the belief it contradicts.
+    
+    This is the next meaningful architectural step after the current milestones:
+    give Genesis the ability to actually revise beliefs, not just flag conflicts.
+    Without it, wrong beliefs and right beliefs can coexist indefinitely.
+
+  [Test 3 done in 0.0s]
+
+  Running test 4/5: Growth Quality...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TEST 4: GROWTH QUALITY OVER TIME
+  Does more input deepen understanding or just add more isolated facts?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Run Genesis for increasing numbers of cycles and measure at each checkpoint:
+    - Total relations stored
+    - Average relations per known concept (depth)
+    - Inference reach from 'wolves' (how many concepts can be reached by chaining)
+    - Prediction error for 'wolves' (should decrease as knowledge grows)
+
+  A system just getting bigger: all metrics grow but at a constant rate.
+  A system getting smarter: inference reach grows FASTER than relation count
+  because each new relation can activate multiple existing chains.
+
+  ── Learning curve
+
+    Stage       Cycles  Relations  Concepts  Avg depth  Inf reach  Wolf err
+    ---------- ------- ---------- --------- ---------- ---------- ---------
+    baseline        20         12        21       0.57          0    0.2150
+    short           80         12        21       0.57          0    0.2150
+
+  ── Analysis
+    Relation growth rate: 0.00 relations/cycle
+    Avg depth change:     +0.00 (positive = concepts getting richer)
+    Inference reach:      0 → 0 (+0 additional concepts reachable)
+    Wolves pred error:    0.2150 → 0.2150 (-0.0000)
+
+  ⚠️   Growth is mostly additive — new facts are not building chains.
+      Relations are being added but concepts remain shallow (few relations each). Consider richer sentence patterns with more explicit relational structure.
+
+  ⚠️   Prediction error for 'wolves' not improving with more cycles.
+      Either few relations about 'wolves' specifically are being stored, or the text processor is normalizing 'wolves' differently than expected.
+
+  WHY IT MATTERS:
+    Filing cabinet vs. knowledge system — this is the clearest test.
+    
+    A filing cabinet grows at a constant rate: 10 new files per hour, always.
+    A knowledge system grows non-linearly: each new fact can connect to many
+    existing facts, and those connections enable new inferences. The value of
+    a new fact isn't just the fact itself — it's every chain it activates.
+    
+    If inference reach grows faster than relation count: knowledge is compounding.
+    Genesis is getting smarter, not just bigger.
+    
+    If they grow at the same rate: facts are being stored as isolated entries.
+    The graph is growing but the connections aren't compounding. That's closer
+    to a sophisticated filing cabinet than to understanding.
+
+  [Test 4 done in 0.4s]
+
+  Running test 5/5: Belief Revision...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TEST 5: BELIEF REVISION (THE HONEST GAP)
+  What happens when new information contradicts old beliefs?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  This test surfaces an honest architectural limitation.
+
+  Teach Genesis something. Then teach it something that updates or corrects
+  the original. Check: does it update, add alongside, or ignore?
+
+  Three scenarios:
+    A. Confidence update: same fact, higher confidence — should update (MAX)
+    B. Same fact, lower confidence — should NOT update (MAX keeps original)
+    C. Contradicting fact — contradiction logged but original belief unchanged
+
+  After showing all three, feed a correction corpus and check whether
+  Genesis's actual answers change — or whether it carries both beliefs forward.
+
+  ── Scenario A: same triple, higher confidence (expect: update)
+    wolves CAUSES biodiversity: 0.50 → 0.90
+
+  ✅  Higher-confidence update applied correctly (MAX rule).
+
+  ── Scenario B: same triple, lower confidence (expect: no change — MAX keeps original)
+    wolves CAUSES biodiversity: 0.90 → 0.90
+
+  ✅  Lower-confidence input correctly ignored (confidence only goes up).
+
+  ── Scenario C: contradicting relation (ENABLES vs PREVENTS)
+    fire ENABLES forest_regeneration: 0.80
+    fire PREVENTS forest_regeneration: 0.70
+    Total contradictions logged: 1
+
+  ✅  Contradiction logged.
+
+  🔲  KNOWN GAP: Both contradicting beliefs survive at full confidence.
+      ENABLES=0.80 and PREVENTS=0.70 both remain. The contradiction is logged but neither belief is demoted.
+      This is the revision gap: Genesis accumulates evidence but does not
+      adjudicate between conflicting beliefs. A correct architecture
+      would lower confidence on the losing side when a stronger contradiction
+      arrives. This is the next architectural step after current milestones.
+
+  ── What genuine belief revision would look like
+
+    If belief revision were implemented:
+      Step 1: fire ENABLES forest_regeneration  at conf=0.80  ← stored
+      Step 2: fire PREVENTS forest_regeneration at conf=0.70  ← contradicts
+      Expected: ENABLES confidence drops (maybe by 0.70 * some revision factor)
+      Currently: ENABLES stays at 0.80, PREVENTS added at 0.70, conflict logged.
+
+    The right fix: when two opposing relations share a subject and object,
+    the weaker one's confidence should be penalized proportionally to the
+    stronger one's confidence. This is Bayesian belief updating — prior belief
+    is revised in light of contradicting evidence, weighted by confidence.
+
+  WHY IT MATTERS:
+    This is the most important honest gap in Genesis right now.
+    
+    A system that never revises beliefs is learning in one direction only.
+    It can get more certain but never less certain. It can add beliefs but
+    never remove wrong ones. Real learning requires both.
+    
+    The school analogy: a student who never crosses out wrong answers on a
+    test will accumulate both correct and incorrect beliefs. Given enough
+    contradicting evidence, the correct beliefs will be higher-confidence —
+    but the wrong beliefs never disappear. They just become less prominent.
+    
+    Genesis currently does this. Contradiction detection (M11) is the flag in
+    the margin. Belief revision — the actual crossing out — is not yet built.
+
+  [Test 5 done in 0.0s]
+
+====================================================================
+  KNOWLEDGE DEVELOPMENT SUMMARY
+====================================================================
+  ✅  Level 1 — Recall
+  ✅  Level 2 — Inference (multi-hop chains)
+  ✅  Level 3 — Calibrated ignorance
+  ✅  Level 4 — Contradiction detection
+  ❌  Level 5 — Growth compounds (smarter, not just bigger)
+
+  🔲  GAP: Belief revision (confidence doesn't drop when contradicted)
+  🔲  GAP: Pattern transfer (cross-domain generalization)
+
+  Knowledge levels demonstrated: 4/5
+
+  RESULT: Genesis is demonstrating real knowledge development.
+  It stores, infers, measures its own ignorance, and detects conflict.
+  The gaps (revision, transfer) are the clear next architectural steps.

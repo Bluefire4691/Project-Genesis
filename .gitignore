@@ -1,0 +1,14 @@
+# Runtime-generated data (book cache, corpus index, DB WAL files, logs)
+data/
+*.db-shm
+*.db-wal
+
+# Generated evaluation reports
+knowledge_eval_report.txt
+falsification_report.txt
+
+# Local LLM endpoint marker (written by start_llm.ps1)
+.llm_endpoint
+.llm_model
+llama/
+models/
